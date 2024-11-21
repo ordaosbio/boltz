@@ -501,13 +501,14 @@ def predict(
         accelerator=accelerator,
         devices=devices,
         precision=32,
+        logger=False
     )
 
     # Compute predictions
     trainer.predict(
         model_module,
         datamodule=data_module,
-        return_predictions=False,
+        return_predictions=True,
     )
 
 
