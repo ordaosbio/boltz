@@ -5,15 +5,15 @@ Democratizing Biomolecular Interaction Modeling
 
 ![](docs/boltz1_pred_figure.png)
 
-Boltz-1 is an open-source model which predicts the 3D structure of proteins, RNA, DNA and small molecules; it handles modified residues, covalent ligands and glycans, as well as condition the generation on pocket residues. 
+Boltz-1 is the state-of-the-art open-source model that predicts the 3D structure of proteins, RNA, DNA, and small molecules; it handles modified residues, covalent ligands and glycans, as well as condition the generation on pocket residues. 
 
-For more information about the model, see our [technical report](https://gcorso.github.io/assets/boltz1.pdf).
+For more information about the model, see our [technical report](https://doi.org/10.1101/2024.11.19.624167).
 
 ## Installation
 Install boltz with PyPI (recommended):
 
 ```
-pip install boltz
+pip install boltz -U
 ```
 
 or directly from GitHub for daily updates:
@@ -29,7 +29,7 @@ cd boltz; pip install -e .
 You can run inference using Boltz-1 with:
 
 ```
-boltz predict input_path
+boltz predict input_path --use_msa_server
 ```
 
 Boltz currently accepts three input formats:
@@ -40,7 +40,15 @@ Boltz currently accepts three input formats:
 
 3. A directory containing files of the above formats, for batched processing
 
-To see all available options: `boltz predict --help` and for more informaton on these input formats, see our [prediction instructions](docs/prediction.md).
+To see all available options: `boltz predict --help` and for more information on these input formats, see our [prediction instructions](docs/prediction.md).
+
+## Evaluation
+
+To encourage reproducibility and facilitate comparison with other models, we provide the evaluation scripts and predictions for Boltz-1, Chai-1 and AlphaFold3 on our test benchmark dataset as well as CASP15. These datasets are created to contain biomolecules different from the training data and to benchmark the performance of these models we run them with the same input MSAs and same number  of recycling and diffusion steps. More details on these evaluations can be found in our [evaluation instructions](docs/evaluation.md).
+
+![Test set evaluations](docs/plot_test.png)
+![CASP15 set evaluations](docs/plot_casp.png)
+
 
 ## Training
 
@@ -48,16 +56,17 @@ If you're interested in retraining the model, see our [training instructions](do
 
 ## Contributing
 
-We welcome external contributions and are eager to engage with the community. Connect with us on our [Slack channel](https://join.slack.com/t/boltz-community/shared_invite/zt-2uexwkemv-Tqt9E747hVkE0VOWlgOcIw) to discuss advancements, share insights, and foster collaboration around Boltz-1.
+We welcome external contributions and are eager to engage with the community. Connect with us on our [Slack channel](https://join.slack.com/t/boltz-community/shared_invite/zt-2w0bw6dtt-kZU4png9HUgprx9NK2xXZw) to discuss advancements, share insights, and foster collaboration around Boltz-1.
 
 ## Coming very soon
 
 - [x] Auto-generated MSAs using MMseqs2
 - [x] More examples
-- [ ] Support for custom paired MSA
-- [ ] Confidence model checkpoint
-- [ ] Pocket conditioning support
-- [ ] Full data processing pipeline
+- [x] Support for custom paired MSA
+- [x] Confidence model checkpoint
+- [x] Chunking for lower memory usage
+- [x] Pocket conditioning support
+- [x] Full data processing pipeline
 - [ ] Colab notebook for inference
 - [ ] Kernel integration
 

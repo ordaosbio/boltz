@@ -6,7 +6,7 @@ from typing import Literal, Optional
 
 import click
 import torch
-from pytorch_lightning import Trainer
+from pytorch_lightning import Trainer, seed_everything
 from pytorch_lightning.strategies import DDPStrategy
 from pytorch_lightning.utilities import rank_zero_only
 from tqdm import tqdm
@@ -15,6 +15,7 @@ from boltz.data import const
 from boltz.data.module.inference import BoltzInferenceDataModule
 from boltz.data.msa.mmseqs2 import run_mmseqs2
 from boltz.data.parse.a3m import parse_a3m
+from boltz.data.parse.csv import parse_csv
 from boltz.data.parse.fasta import parse_fasta
 from boltz.data.parse.yaml import parse_yaml
 from boltz.data.types import MSA, Manifest, Record
@@ -22,7 +23,9 @@ from boltz.data.write.writer import BoltzWriter
 from boltz.model.model import Boltz1
 
 CCD_URL = "https://huggingface.co/boltz-community/boltz-1/resolve/main/ccd.pkl"
-MODEL_URL = "https://huggingface.co/boltz-community/boltz-1/resolve/main/boltz1.ckpt"
+MODEL_URL = (
+    "https://huggingface.co/boltz-community/boltz-1/resolve/main/boltz1_conf.ckpt"
+)
 
 
 @dataclass
@@ -74,7 +77,7 @@ def download(cache: Path) -> None:
         urllib.request.urlretrieve(CCD_URL, str(ccd))  # noqa: S310
 
     # Download model
-    model = cache / "boltz1.ckpt"
+    model = cache / "boltz1_conf.ckpt"
     if not model.exists():
         click.echo(
             f"Downloading the model weights to {model}. You may "
@@ -158,31 +161,77 @@ def check_inputs(
     return data
 
 
-def compute_msa(data: dict[str, str], msa_dir: Path) -> list[Path]:
+def compute_msa(
+    data: dict[str, str],
+    target_id: str,
+    msa_dir: Path,
+    msa_server_url: str,
+    msa_pairing_strategy: str,
+) -> None:
     """Compute the MSA for the input data.
 
     Parameters
     ----------
     data : dict[str, str]
         The input protein sequences.
+    target_id : str
+        The target id.
     msa_dir : Path
-        The msa temp directory.
-
-    Returns
-    -------
-    list[Path]
-        The list of MSA files.
+        The msa directory.
+    msa_server_url : str
+        The MSA server URL.
+    msa_pairing_strategy : str
+        The MSA pairing strategy.
 
     """
-    # Run MMSeqs2
-    msa = run_mmseqs2(list(data.values()), msa_dir, use_pairing=len(data) > 1)
+    if len(data) > 1:
+        paired_msas = run_mmseqs2(
+            list(data.values()),
+            msa_dir / f"{target_id}_paired_tmp",
+            use_env=True,
+            use_pairing=True,
+            host_url=msa_server_url,
+            pairing_strategy=msa_pairing_strategy,
+        )
+    else:
+        paired_msas = [""] * len(data)
 
-    # Dump to A3M
-    for idx, key in enumerate(data):
-        entity_msa = msa[idx]
-        msa_path = msa_dir / f"{key}.a3m"
+    unpaired_msa = run_mmseqs2(
+        list(data.values()),
+        msa_dir / f"{target_id}_unpaired_tmp",
+        use_env=True,
+        use_pairing=False,
+        host_url=msa_server_url,
+        pairing_strategy=msa_pairing_strategy,
+    )
+
+    for idx, name in enumerate(data):
+        # Get paired sequences
+        paired = paired_msas[idx].strip().splitlines()
+        paired = paired[1::2]  # ignore headers
+        paired = paired[: const.max_paired_seqs]
+
+        # Set key per row and remove empty sequences
+        keys = [idx for idx, s in enumerate(paired) if s != "-" * len(s)]
+        paired = [s for s in paired if s != "-" * len(s)]
+
+        # Combine paired-unpaired sequences
+        unpaired = unpaired_msa[idx].strip().splitlines()
+        unpaired = unpaired[1::2]
+        unpaired = unpaired[: (const.max_msa_seqs - len(paired))]
+        if paired:
+            unpaired = unpaired[1:]  # ignore query is already present
+
+        # Combine
+        seqs = paired + unpaired
+        keys = keys + [-1] * len(unpaired)
+
+        # Dump MSA
+        csv_str = ["key,sequence"] + [f"{key},{seq}" for key, seq in zip(keys, seqs)]
+
+        msa_path = msa_dir / f"{name}.csv"
         with msa_path.open("w") as f:
-            f.write(entity_msa)
+            f.write("\n".join(csv_str))
 
 
 @rank_zero_only
@@ -190,6 +239,8 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
     data: list[Path],
     out_dir: Path,
     ccd_path: Path,
+    msa_server_url: str,
+    msa_pairing_strategy: str,
     max_msa_seqs: int = 4096,
     use_msa_server: bool = False,
 ) -> None:
@@ -204,7 +255,7 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
     ccd_path : Path
         The path to the CCD dictionary.
     max_msa_seqs : int, optional
-        Max number of MSA seuqneces, by default 4096.
+        Max number of MSA sequences, by default 4096.
     use_msa_server : bool, optional
         Whether to use the MMSeqs2 server for MSA generation, by default False.
 
@@ -225,8 +276,8 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
     out_dir.mkdir(parents=True, exist_ok=True)
     msa_dir.mkdir(parents=True, exist_ok=True)
     structure_dir.mkdir(parents=True, exist_ok=True)
-    predictions_dir.mkdir(parents=True, exist_ok=True)
     processed_msa_dir.mkdir(parents=True, exist_ok=True)
+    predictions_dir.mkdir(parents=True, exist_ok=True)
 
     # Load CCD
     with ccd_path.open("rb") as file:
@@ -250,6 +301,9 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
             )
             raise RuntimeError(msg)
 
+        # Get target id
+        target_id = target.record.id
+
         # Get all MSA ids and decide whether to generate MSA
         to_generate = {}
         prot_id = const.chain_type_ids["PROTEIN"]
@@ -257,8 +311,9 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
             # Add to generate list, assigning entity id
             if (chain.mol_type == prot_id) and (chain.msa_id == 0):
                 entity_id = chain.entity_id
-                to_generate[entity_id] = target.sequences[entity_id]
-                chain.msa_id = msa_dir / f"{entity_id}.a3m"
+                msa_id = f"{target_id}_{entity_id}"
+                to_generate[msa_id] = target.sequences[entity_id]
+                chain.msa_id = msa_dir / f"{msa_id}.csv"
 
             # We do not support msa generation for non-protein chains
             elif chain.msa_id == 0:
@@ -272,10 +327,16 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
         if to_generate:
             msg = f"Generating MSA for {path} with {len(to_generate)} protein entities."
             click.echo(msg)
-            compute_msa(to_generate, msa_dir)
+            compute_msa(
+                data=to_generate,
+                target_id=target_id,
+                msa_dir=msa_dir,
+                msa_server_url=msa_server_url,
+                msa_pairing_strategy=msa_pairing_strategy,
+            )
 
         # Parse MSA data
-        msas = {c.msa_id for c in target.record.chains if c.msa_id != -1}
+        msas = sorted({c.msa_id for c in target.record.chains if c.msa_id != -1})
         msa_id_map = {}
         for msa_idx, msa_id in enumerate(msas):
             # Check that raw MSA exists
@@ -285,14 +346,22 @@ def process_inputs(  # noqa: C901, PLR0912, PLR0915
                 raise FileNotFoundError(msg)
 
             # Dump processed MSA
-            processed = processed_msa_dir / f"{msa_idx}.npz"
-            msa_id_map[msa_id] = msa_idx
+            processed = processed_msa_dir / f"{target_id}_{msa_idx}.npz"
+            msa_id_map[msa_id] = f"{target_id}_{msa_idx}"
             if not processed.exists():
-                msa: MSA = parse_a3m(
-                    msa_path,
-                    taxonomy=None,
-                    max_seqs=max_msa_seqs,
-                )
+                # Parse A3M
+                if msa_path.suffix == ".a3m":
+                    msa: MSA = parse_a3m(
+                        msa_path,
+                        taxonomy=None,
+                        max_seqs=max_msa_seqs,
+                    )
+                elif msa_path.suffix == ".csv":
+                    msa: MSA = parse_csv(msa_path, max_seqs=max_msa_seqs)
+                else:
+                    msg = f"MSA file {msa_path} not supported, only a3m or csv."
+                    raise RuntimeError(msg)
+
                 msa.dump(processed)
 
         # Modify records to point to processed MSA
@@ -369,6 +438,25 @@ def cli() -> None:
     default=1,
 )
 @click.option(
+    "--step_scale",
+    type=float,
+    help="The step size is related to the temperature at which the diffusion process samples the distribution."
+    "The lower the higher the diversity among samples (recommended between 1 and 2). Default is 1.638.",
+    default=1.638,
+)
+@click.option(
+    "--write_full_pae",
+    type=bool,
+    is_flag=True,
+    help="Whether to dump the pae into a npz file. Default is True.",
+)
+@click.option(
+    "--write_full_pde",
+    type=bool,
+    is_flag=True,
+    help="Whether to dump the pde into a npz file. Default is False.",
+)
+@click.option(
     "--output_format",
     type=click.Choice(["pdb", "mmcif"]),
     help="The output format to use for the predictions. Default is mmcif.",
@@ -386,9 +474,27 @@ def cli() -> None:
     help="Whether to override existing found predictions. Default is False.",
 )
 @click.option(
+    "--seed",
+    type=int,
+    help="Seed to use for random number generator. Default is None (no seeding).",
+    default=None,
+)
+@click.option(
     "--use_msa_server",
     is_flag=True,
     help="Whether to use the MMSeqs2 server for MSA generation. Default is False.",
+)
+@click.option(
+    "--msa_server_url",
+    type=str,
+    help="MSA server url. Used only if --use_msa_server is set. ",
+    default="https://api.colabfold.com",
+)
+@click.option(
+    "--msa_pairing_strategy",
+    type=str,
+    help="Pairing strategy to use. Used only if --use_msa_server is set. Options are 'greedy' and 'complete'",
+    default="greedy",
 )
 def predict(
     data: str,
@@ -400,10 +506,16 @@ def predict(
     recycling_steps: int = 3,
     sampling_steps: int = 200,
     diffusion_samples: int = 1,
+    step_scale: float = 1.638,
+    write_full_pae: bool = False,
+    write_full_pde: bool = False,
     output_format: Literal["pdb", "mmcif"] = "mmcif",
     num_workers: int = 2,
     override: bool = False,
+    seed: Optional[int] = None,
     use_msa_server: bool = False,
+    msa_server_url: str = "https://api.colabfold.com",
+    msa_pairing_strategy: str = "greedy",
 ) -> None:
     """Run predictions with Boltz-1."""
     # If cpu, write a friendly warning
@@ -413,6 +525,13 @@ def predict(
 
     # Set no grad
     torch.set_grad_enabled(False)
+
+    # Ignore matmul precision warning
+    torch.set_float32_matmul_precision("highest")
+
+    # Set seed if desired
+    if seed is not None:
+        seed_everything(seed)
 
     # Set cache path
     cache = Path(cache).expanduser()
@@ -433,6 +552,19 @@ def predict(
         click.echo("No predictions to run, exiting.")
         return
 
+    # Set up trainer
+    strategy = "auto"
+    if (isinstance(devices, int) and devices > 1) or (
+        isinstance(devices, list) and len(devices) > 1
+    ):
+        strategy = DDPStrategy()
+        if len(data) < devices:
+            msg = (
+                "Number of requested devices is greater "
+                "than the number of predictions."
+            )
+            raise ValueError(msg)
+
     msg = f"Running predictions for {len(data)} structure"
     msg += "s" if len(data) > 1 else ""
     click.echo(msg)
@@ -444,6 +576,8 @@ def predict(
         out_dir=out_dir,
         ccd_path=ccd_path,
         use_msa_server=use_msa_server,
+        msa_server_url=msa_server_url,
+        msa_pairing_strategy=msa_pairing_strategy,
     )
 
     # Load processed data
@@ -464,19 +598,25 @@ def predict(
 
     # Load model
     if checkpoint is None:
-        checkpoint = cache / "boltz1.ckpt"
+        checkpoint = cache / "boltz1_conf.ckpt"
 
     predict_args = {
         "recycling_steps": recycling_steps,
         "sampling_steps": sampling_steps,
         "diffusion_samples": diffusion_samples,
+        "write_confidence_summary": True,
+        "write_full_pae": write_full_pae,
+        "write_full_pde": write_full_pde,
     }
+    diffusion_params = BoltzDiffusionParams()
+    diffusion_params.step_scale = step_scale
     model_module: Boltz1 = Boltz1.load_from_checkpoint(
         checkpoint,
         strict=True,
         predict_args=predict_args,
         map_location="cpu",
-        diffusion_process_args=asdict(BoltzDiffusionParams()),
+        diffusion_process_args=asdict(diffusion_params),
+        ema=False,
     )
     model_module.eval()
 
@@ -486,13 +626,6 @@ def predict(
         output_dir=out_dir / "predictions",
         output_format=output_format,
     )
-
-    # Set up trainer
-    strategy = "auto"
-    if (isinstance(devices, int) and devices > 1) or (
-        isinstance(devices, list) and len(devices) > 1
-    ):
-        strategy = DDPStrategy()
 
     trainer = Trainer(
         default_root_dir=out_dir,
