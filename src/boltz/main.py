@@ -848,7 +848,7 @@ def cli() -> None:
     "--msa_server_url",
     type=str,
     help="MSA server url. Used only if --use_msa_server is set. ",
-    default="https://api.colabfold.com",
+    default="#",
 )
 @click.option(
     "--msa_pairing_strategy",

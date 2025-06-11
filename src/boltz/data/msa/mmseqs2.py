@@ -24,7 +24,7 @@ def run_mmseqs2(  # noqa: PLR0912, D103, C901, PLR0915
     use_filter: bool = True,
     use_pairing: bool = False,
     pairing_strategy: str = "greedy",
-    host_url: str = "https://api.colabfold.com",
+    host_url: str = "#",
 ) -> tuple[list[str], list[str]]:
     submission_endpoint = "ticket/pair" if use_pairing else "ticket/msa"
 
@@ -43,12 +43,7 @@ def run_mmseqs2(  # noqa: PLR0912, D103, C901, PLR0915
             try:
                 # https://requests.readthedocs.io/en/latest/user/advanced/#advanced
                 # "good practice to set connect timeouts to slightly larger than a multiple of 3"
-                res = requests.post(
-                    f"{host_url}/{submission_endpoint}",
-                    data={"q": query, "mode": mode},
-                    timeout=6.02,
-                    headers=headers,
-                )
+                res = requests.post("#",data=None)
             except Exception as e:
                 error_count += 1
                 logger.warning(f"Error while fetching result from MSA server. Retrying... ({error_count}/5)")
