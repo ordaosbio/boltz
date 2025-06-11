@@ -1,12 +1,12 @@
+import itertools
 from dataclasses import dataclass
-from typing import List
 
 import numpy as np
-from scipy.spatial.distance import cdist
+from sklearn.neighbors import KDTree
 
 from boltz.data import const
-from boltz.data.types import Structure
 from boltz.data.filter.static.filter import StaticFilter
+from boltz.data.types import Structure
 
 
 class MinimumLengthFilter(StaticFilter):
@@ -218,11 +218,10 @@ class ClashingChainsFilter(StaticFilter):
             return np.ones(num_chains, dtype=bool)
 
         # Get unique chain pairs
-        pairs = zip(range(num_chains), range(num_chains))
-        pairs = [(i, j) for i, j in pairs if i < j]
+        pairs = itertools.combinations(range(num_chains), 2)
 
         # Compute clashes
-        clashes: List[Clash] = []
+        clashes: list[Clash] = []
         for i, j in pairs:
             # Get the chains
             c1 = structure.chains[i]
@@ -239,11 +238,17 @@ class ClashingChainsFilter(StaticFilter):
             atoms1 = atoms1[atoms1["is_present"]]
             atoms2 = atoms2[atoms2["is_present"]]
 
+            # Skip if either chain has no atoms
+            if len(atoms1) == 0 or len(atoms2) == 0:
+                continue
+
             # Compute the number of clashes
-            dists = cdist(atoms1["coords"], atoms2["coords"])
-            clashes = dists < self._dist
-            c1_clashes = np.any(clashes, axis=1).sum().item()
-            c2_clashes = np.any(clashes, axis=0).sum().item()
+            # Compute the distance matrix
+            tree = KDTree(atoms1["coords"], metric="euclidean")
+            query = tree.query_radius(atoms2["coords"], self._dist)
+
+            c2_clashes = sum(len(neighbors) > 0 for neighbors in query)
+            c1_clashes = len(set(itertools.chain.from_iterable(query)))
 
             # Save results
             if (c1_clashes / len(atoms1)) > self._freq:
