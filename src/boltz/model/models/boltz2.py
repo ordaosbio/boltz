@@ -67,6 +67,7 @@ class Boltz2(LightningModule):
         affinity_prediction: bool = False,
         affinity_ensemble: bool = False,
         affinity_mw_correction: bool = True,
+        ppi: bool = False,
         run_trunk_and_structure: bool = True,
         skip_run_structure: bool = False,
         token_level_confidence: bool = True,
@@ -295,6 +296,7 @@ class Boltz2(LightningModule):
         self.affinity_prediction = affinity_prediction
         self.affinity_ensemble = affinity_ensemble
         self.affinity_mw_correction = affinity_mw_correction
+        self.ppi = ppi
         self.run_trunk_and_structure = run_trunk_and_structure
         self.skip_run_structure = skip_run_structure
         self.token_level_confidence = token_level_confidence
@@ -605,13 +607,22 @@ class Boltz2(LightningModule):
             pad_token_mask = feats["token_pad_mask"][0]
             rec_mask = feats["mol_type"][0] == 0
             rec_mask = rec_mask * pad_token_mask
-            lig_mask = feats["affinity_token_mask"][0].to(torch.bool)
-            lig_mask = lig_mask * pad_token_mask
-            cross_pair_mask = (
-                lig_mask[:, None] * rec_mask[None, :]
-                + rec_mask[:, None] * lig_mask[None, :]
-                + lig_mask[:, None] * lig_mask[None, :]
-            )
+            if not self.ppi:
+                lig_mask = feats["affinity_token_mask"][0].to(torch.bool)
+                lig_mask = lig_mask * pad_token_mask
+                cross_pair_mask = (
+                    lig_mask[:, None] * rec_mask[None, :]
+                    + rec_mask[:, None] * lig_mask[None, :]
+                    + lig_mask[:, None] * lig_mask[None, :]
+                )
+            else:
+                ppi_rec_mask = feats["ppi_rec_token_mask"][0].to(torch.bool)
+                ppi_lig_mask = feats["ppi_lig_token_mask"][0].to(torch.bool)
+                cross_pair_mask = (
+                    ppi_rec_mask[:, None] * ppi_lig_mask[None, :]
+                    + ppi_lig_mask[:, None] * ppi_rec_mask[None, :]
+                    + rec_mask[:, None] * rec_mask[None, :]
+                )
             z_affinity = z * cross_pair_mask[None, :, :, None]
 
             argsort = torch.argsort(dict_out["iptm"], descending=True)

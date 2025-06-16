@@ -1,4 +1,5 @@
 from dataclasses import astuple, dataclass
+from re import I
 from typing import Optional
 
 import numpy as np
@@ -40,7 +41,9 @@ class TokenData:
     frame_t: np.ndarray
     frame_mask: bool
     cyclic_period: int
-    affinity_mask: bool = False
+    affinity_mask: bool = False,
+    ppi_rec_mask: bool = False,
+    ppi_lig_mask: bool = False
 
 
 def compute_frame(
@@ -144,6 +147,12 @@ def tokenize_structure(  # noqa: C901, PLR0915
         affinity_mask = (affinity is not None) and (
             int(chain["asym_id"]) == int(affinity.chain_id)
         )
+        ppi_rec_mask = (affinity is not None) and (
+            int(chain["asym_id"]) == int(affinity.rec_chain_id)
+        )
+        ppi_lig_mask = (affinity is not None) and (
+            int(chain["asym_id"]) == int(affinity.lig_chain_id)
+        )
 
         for res in struct.residues[res_start:res_end]:
             # Get atom indices
@@ -218,6 +227,8 @@ def tokenize_structure(  # noqa: C901, PLR0915
                     frame_mask=frame_mask,
                     cyclic_period=chain["cyclic_period"],
                     affinity_mask=affinity_mask,
+                    ppi_rec_mask=ppi_rec_mask,
+                    ppi_lig_mask=ppi_lig_mask
                 )
                 token_data.append(astuple(token))
 
@@ -270,6 +281,8 @@ def tokenize_structure(  # noqa: C901, PLR0915
                         frame_mask=False,
                         cyclic_period=chain["cyclic_period"],
                         affinity_mask=affinity_mask,
+                        ppi_rec_mask=ppi_rec_mask,
+                        ppi_lig_mask=ppi_lig_mask
                     )
                     token_data.append(astuple(token))
 
@@ -317,6 +330,8 @@ def tokenize_structure(  # noqa: C901, PLR0915
                     frame_mask=False,
                     cyclic_period=chain["cyclic_period"],
                     affinity_mask=affinity_mask,
+                    ppi_rec_mask=ppi_rec_mask,
+                    ppi_lig_mask=ppi_lig_mask
                 )
                 token_data.append(astuple(token))
 

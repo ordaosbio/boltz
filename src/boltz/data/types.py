@@ -560,6 +560,8 @@ class AffinityInfo:
 
     chain_id: int
     mw: float
+    rec_chain_id: Optional[int] = None
+    lig_chain_id: Optional[int] = None
 
 
 @dataclass(frozen=True)

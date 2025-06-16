@@ -44,6 +44,7 @@ class AffinityModule(nn.Module):
         max_dist=22,
         use_cross_transformer: bool = False,
         groups: dict = {},
+        ppi: bool = False
     ):
         super().__init__()
         boundaries = torch.linspace(2, max_dist, num_dist_bins - 1)
@@ -73,6 +74,7 @@ class AffinityModule(nn.Module):
             False,
             groups=groups,
         )
+        self.ppi = ppi
 
     def forward(
         self,
@@ -112,17 +114,36 @@ class AffinityModule(nn.Module):
         pad_token_mask = feats["token_pad_mask"].repeat_interleave(multiplicity, 0)
         rec_mask = (feats["mol_type"] == 0).repeat_interleave(multiplicity, 0)
         rec_mask = rec_mask * pad_token_mask
-        lig_mask = (
-            feats["affinity_token_mask"]
-            .repeat_interleave(multiplicity, 0)
-            .to(torch.bool)
-        )
-        lig_mask = lig_mask * pad_token_mask
-        cross_pair_mask = (
-            lig_mask[:, :, None] * rec_mask[:, None, :]
-            + rec_mask[:, :, None] * lig_mask[:, None, :]
-            + lig_mask[:, :, None] * lig_mask[:, None, :]
-        )
+        
+        if not self.ppi:
+            lig_mask = (
+                feats["affinity_token_mask"]
+                .repeat_interleave(multiplicity, 0)
+                .to(torch.bool)
+            )
+            lig_mask = lig_mask * pad_token_mask
+            cross_pair_mask = (
+                lig_mask[:, :, None] * rec_mask[:, None, :]
+                + rec_mask[:, :, None] * lig_mask[:, None, :]
+                + lig_mask[:, :, None] * lig_mask[:, None, :]
+            )
+        else:
+            ppi_rec_mask = (
+                feats["ppi_rec_token_mask"]
+                .repeat_interleave(multiplicity, 0)
+                .to(torch.bool)
+            )
+            ppi_lig_mask = (
+                feats["ppi_lig_token_mask"]
+                .repeat_interleave(multiplicity, 0)
+                .to(torch.bool)
+            )
+            cross_pair_mask = (
+                ppi_rec_mask[:, :, None] * ppi_lig_mask[:, None, :]
+                + ppi_lig_mask[:, :, None] * ppi_rec_mask[:, None, :]
+                + rec_mask[:, :, None] * rec_mask[:, None, :]
+            )
+        
         z = self.pairformer_stack(
             z,
             pair_mask=cross_pair_mask,
@@ -188,19 +209,38 @@ class AffinityHeadsTransformer(nn.Module):
             (feats["mol_type"] == 0).repeat_interleave(multiplicity, 0).unsqueeze(-1)
         )
         rec_mask = rec_mask * pad_token_mask
-        lig_mask = (
-            feats["affinity_token_mask"]
-            .repeat_interleave(multiplicity, 0)
-            .to(torch.bool)
-            .unsqueeze(-1)
-        ) * pad_token_mask
-        cross_pair_mask = (
-            lig_mask[:, :, None] * rec_mask[:, None, :]
-            + rec_mask[:, :, None] * lig_mask[:, None, :]
-            + (lig_mask[:, :, None] * lig_mask[:, None, :])
-        ) * (
+        if not self.ppi:
+            lig_mask = (
+                feats["affinity_token_mask"]
+                .repeat_interleave(multiplicity, 0)
+                .to(torch.bool)
+                .unsqueeze(-1)
+            ) * pad_token_mask
+            cross_pair_mask = (
+                lig_mask[:, :, None] * rec_mask[:, None, :]
+                + rec_mask[:, :, None] * lig_mask[:, None, :]
+                + (lig_mask[:, :, None] * lig_mask[:, None, :])
+            ) 
+        else:
+            ppi_rec_mask = (
+                feats["ppi_rec_token_mask"]
+                .repeat_interleave(multiplicity, 0)
+                .to(torch.bool)
+            )
+            ppi_lig_mask = (
+                feats["ppi_lig_token_mask"]
+                .repeat_interleave(multiplicity, 0)
+                .to(torch.bool)
+            )
+            cross_pair_mask = (
+                ppi_rec_mask[:, :, None] * ppi_lig_mask[:, None, :]
+                + ppi_lig_mask[:, :, None] * ppi_rec_mask[:, None, :]
+                + rec_mask[:, :, None] * rec_mask[:, None, :]
+            )
+        
+        cross_pair_mask *= (
             1
-            - torch.eye(lig_mask.shape[1], device=lig_mask.device)
+            - torch.eye(rec_mask.shape[1], device=rec_mask.device)
             .unsqueeze(-1)
             .unsqueeze(0)
         )

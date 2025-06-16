@@ -657,6 +657,8 @@ def process_token_features(  # noqa: C901, PLR0915, PLR0912
     modified = from_numpy(token_data["modified"]).long()  # float()
     cyclic_period = from_numpy(token_data["cyclic_period"].copy())
     affinity_mask = from_numpy(token_data["affinity_mask"]).float()
+    ppi_rec_mask = from_numpy(token_data["ppi_rec_mask"]).float()
+    ppi_lig_mask = from_numpy(token_data["ppi_lig_mask"]).float()
 
     ## Conditioning features ##
     method = (
@@ -1056,6 +1058,8 @@ def process_token_features(  # noqa: C901, PLR0915, PLR0912
             modified = pad_dim(modified, 0, pad_len)
             cyclic_period = pad_dim(cyclic_period, 0, pad_len)
             affinity_mask = pad_dim(affinity_mask, 0, pad_len)
+            ppi_rec_mask = pad_dim(ppi_rec_mask, 0, pad_len)
+            ppi_lig_mask = pad_dim(ppi_lig_mask, 0, pad_len)
 
     token_features = {
         "token_index": token_index,
@@ -1077,6 +1081,8 @@ def process_token_features(  # noqa: C901, PLR0915, PLR0912
         "modified": modified,
         "cyclic_period": cyclic_period,
         "affinity_token_mask": affinity_mask,
+        "ppi_rec_token_mask": ppi_rec_mask,
+        "ppi_lig_token_mask": ppi_lig_mask
     }
 
     return token_features

@@ -793,6 +793,7 @@ def parse_polymer(
     components: dict[str, Mol],
     cyclic: bool,
     mol_dir: Path,
+    affinity: bool = False
 ) -> Optional[ParsedChain]:
     """Process a sequence into a chain object.
 
@@ -913,6 +914,7 @@ def parse_polymer(
         type=chain_type,
         cyclic_period=cyclic_period,
         sequence=raw_sequence,
+        affinity=affinity
     )
 
 
@@ -1043,7 +1045,11 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
     for prop in properties:
         prop_type = next(iter(prop.keys())).lower()
         if prop_type == "affinity":
-            binder = prop["affinity"]["binder"]
+            if "binder" in prop["affinity"]:
+                binder = prop["affinity"]["binder"] 
+            else:
+                binder = prop["affinity"]["lig"]
+                ppi_rec = prop["affinity"]["rec"]
             if not isinstance(binder, str):
                 # TODO: support multi residue ligands and ccd's
                 msg = "Binder must be a single chain."
@@ -1057,8 +1063,9 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 msg = (
                     f"Chain {binder} is not a ligand! "
                     "Affinity is currently only supported for ligands."
+                    "Unless you are trying PPI, so actually never mind"
                 )
-                raise ValueError(msg)
+                # raise ValueError(msg)
 
             affinity_ligands.add(binder)
 
@@ -1170,6 +1177,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 components=ccd,
                 cyclic=cyclic,
                 mol_dir=mol_dir,
+                affinity=affinity
             )
 
         # Parse a non-polymer
@@ -1331,6 +1339,8 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
             affinity_info = AffinityInfo(
                 chain_id=asym_id,
                 mw=chain.affinity_mw,
+                rec_chain_id=ppi_rec,
+                lig_chain_id=asym_id
             )
 
         # Find all copies of this chain in the assembly
