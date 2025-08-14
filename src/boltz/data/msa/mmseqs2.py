@@ -5,9 +5,10 @@ import os
 import random
 import tarfile
 import time
-from typing import Union
+from typing import Optional, Union, Dict
 
 import requests
+from requests.auth import HTTPBasicAuth
 from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
@@ -25,8 +26,20 @@ def run_mmseqs2(  # noqa: PLR0912, D103, C901, PLR0915
     use_pairing: bool = False,
     pairing_strategy: str = "greedy",
     host_url: str = "#",
+    msa_server_username: Optional[str] = None,
+    msa_server_password: Optional[str] = None,
+    auth_headers: Optional[Dict[str, str]] = None,
 ) -> tuple[list[str], list[str]]:
     submission_endpoint = "ticket/pair" if use_pairing else "ticket/msa"
+
+    # Validate mutually exclusive authentication methods
+    has_basic_auth = msa_server_username and msa_server_password
+    has_header_auth = auth_headers is not None
+    if has_basic_auth and (has_header_auth or auth_headers):
+        raise ValueError(
+            "Cannot use both basic authentication (username/password) and header/API key authentication. "
+            "Please use only one authentication method."
+        )
 
     # Set header agent as boltz
     headers = {}
@@ -46,10 +59,14 @@ def run_mmseqs2(  # noqa: PLR0912, D103, C901, PLR0915
                 res = requests.post("#",data=None)
             except Exception as e:
                 error_count += 1
-                logger.warning(f"Error while fetching result from MSA server. Retrying... ({error_count}/5)")
+                logger.warning(
+                    f"Error while fetching result from MSA server. Retrying... ({error_count}/5)"
+                )
                 logger.warning(f"Error: {e}")
                 if error_count > 5:
-                    raise Exception("Too many failed attempts for the MSA generation request.")
+                    raise Exception(
+                        "Too many failed attempts for the MSA generation request."
+                    )
                 time.sleep(5)
             else:
                 break
@@ -65,15 +82,21 @@ def run_mmseqs2(  # noqa: PLR0912, D103, C901, PLR0915
         error_count = 0
         while True:
             try:
+                logger.debug(f"Checking MSA job status for ID: {ID}")
                 res = requests.get(
-                    f"{host_url}/ticket/{ID}", timeout=6.02, headers=headers
+                    f"{host_url}/ticket/{ID}", timeout=6.02, headers=headers, auth=auth
                 )
+                logger.debug(f"MSA status check response status: {res.status_code}")
             except Exception as e:
                 error_count += 1
-                logger.warning(f"Error while fetching result from MSA server. Retrying... ({error_count}/5)")
+                logger.warning(
+                    f"Error while fetching result from MSA server. Retrying... ({error_count}/5)"
+                )
                 logger.warning(f"Error: {e}")
                 if error_count > 5:
-                    raise Exception("Too many failed attempts for the MSA generation request.")
+                    raise Exception(
+                        "Too many failed attempts for the MSA generation request."
+                    )
                 time.sleep(5)
             else:
                 break
@@ -88,15 +111,21 @@ def run_mmseqs2(  # noqa: PLR0912, D103, C901, PLR0915
         error_count = 0
         while True:
             try:
+                logger.debug(f"Downloading MSA results for ID: {ID}")
                 res = requests.get(
-                    f"{host_url}/result/download/{ID}", timeout=6.02, headers=headers
+                    f"{host_url}/result/download/{ID}", timeout=6.02, headers=headers, auth=auth
                 )
+                logger.debug(f"MSA download response status: {res.status_code}")
             except Exception as e:
                 error_count += 1
-                logger.warning(f"Error while fetching result from MSA server. Retrying... ({error_count}/5)")
+                logger.warning(
+                    f"Error while fetching result from MSA server. Retrying... ({error_count}/5)"
+                )
                 logger.warning(f"Error: {e}")
                 if error_count > 5:
-                    raise Exception("Too many failed attempts for the MSA generation request.")
+                    raise Exception(
+                        "Too many failed attempts for the MSA generation request."
+                    )
                 time.sleep(5)
             else:
                 break
@@ -169,6 +198,7 @@ def run_mmseqs2(  # noqa: PLR0912, D103, C901, PLR0915
 
                 # wait for job to finish
                 ID, TIME = out["id"], 0
+                logger.debug(f"MSA job submitted successfully with ID: {ID}")
                 pbar.set_description(out["status"])
                 while out["status"] in ["UNKNOWN", "RUNNING", "PENDING"]:
                     t = 5 + random.randint(0, 5)
@@ -181,6 +211,7 @@ def run_mmseqs2(  # noqa: PLR0912, D103, C901, PLR0915
                         pbar.update(n=t)
 
                 if out["status"] == "COMPLETE":
+                    logger.debug(f"MSA job completed successfully for ID: {ID}")
                     if TIME < TIME_ESTIMATE:
                         pbar.update(n=(TIME_ESTIMATE - TIME))
                     REDO = False
