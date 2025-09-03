@@ -11,7 +11,7 @@ import copy
 import random
 from boltz.data import const
 from boltz.data.types import MSA, Connection, Input, Structure, Interface
-from boltz.model.model import Boltz1
+from boltz.model.models.boltz1 import Boltz1
 from boltz.main import BoltzDiffusionParams
 from boltz.data.tokenize.boltz import BoltzTokenizer
 from boltz.data.feature.featurizer import BoltzFeaturizer
@@ -20,7 +20,7 @@ from boltz.data.write.mmcif import to_mmcif
 from boltz.data.write.pdb import to_pdb
 import yaml
 import shutil
-from Bio.PDB import PDBParser, MMCIFParser  
+from Bio.PDB import PDBParser, MMCIFParser
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
@@ -49,7 +49,7 @@ def save_confidence_scores(folder_dir, output, structure,name, model_idx=0):
         residues=residues,
         interfaces=interfaces,
     )
-    plddts= output['plddt'].detach().cpu().numpy()[0]        
+    plddts= output['plddt'].detach().cpu().numpy()[0]
     path = Path(output_dir) / f"{name}_model_{model_idx}.cif"
     with path.open("w") as f:
         f.write(to_mmcif(new_structure, plddts=plddts))
@@ -59,18 +59,18 @@ def save_confidence_scores(folder_dir, output, structure,name, model_idx=0):
         confidence_summary_dict = {}
         for key in [
             "confidence_score",
-            "ptm", 
+            "ptm",
             "iptm",
             "ligand_iptm",
             "protein_iptm",
             "complex_plddt",
-            "complex_iplddt", 
+            "complex_iplddt",
             "complex_pde",
             "complex_ipde",
         ]:
             if key in output:
                 confidence_summary_dict[key] = output[key].item()
-        
+
         if "pair_chains_iptm" in output:
             confidence_summary_dict["chains_ptm"] = {
                 idx: output["pair_chains_iptm"][idx][idx].item()
@@ -170,7 +170,7 @@ def visualize_training_history(best_batch, loss_history, sequence_history, disto
         fig, ax = plt.subplots(figsize=(6,6))
         distogram_2d = distogram_history[0]
         im = ax.imshow(distogram_2d)
-    
+
         plt.colorbar(im, ax=ax)
         ax.set_title('Distogram Evolution')
 
@@ -233,7 +233,7 @@ def get_CA_and_sequence(structure_file, chain_id='A'):
         parser = PDBParser(QUIET=True)
     else:
         raise ValueError("File must be either .cif or .pdb format")
-        
+
     structure = parser.get_structure("structure", structure_file)
     xyz = []
     sequence = []
@@ -244,9 +244,9 @@ def get_CA_and_sequence(structure_file, chain_id='A'):
         'MET': 'M', 'PHE': 'F', 'PRO': 'P', 'SER': 'S',
         'THR': 'T', 'TRP': 'W', 'TYR': 'Y', 'VAL': 'V'
     }
-    
+
     model = structure[0]  # Get first model (default for most structures)
-    
+
     if chain_id in model:
         chain = model[chain_id]
         for residue in chain:
@@ -255,32 +255,32 @@ def get_CA_and_sequence(structure_file, chain_id='A'):
                 sequence.append(aa_map.get(residue.resname, 'X'))
     else:
         raise ValueError(f"Chain {chain_id} not found in {structure_file}")
-    
+
     return xyz, sequence
 
 
 def np_kabsch(a, b, return_v=False):
     '''Get alignment matrix for two sets of coordinates using numpy
-    
+
     Args:
         a: First set of coordinates
         b: Second set of coordinates
         return_v: If True, return U matrix from SVD. If False, return rotation matrix
-        
+
     Returns:
         Rotation matrix (or U matrix if return_v=True) to align coordinates
     '''
     # Calculate covariance matrix
     ab = np.swapaxes(a, -1, -2) @ b
-    
+
     # Singular value decomposition
     u, s, vh = np.linalg.svd(ab, full_matrices=False)
-    
+
     # Handle reflection case
     flip = np.linalg.det(u @ vh) < 0
     if flip:
         u[...,-1] = -u[...,-1]
-    
+
     return u if return_v else (u @ vh)
 
 
@@ -298,30 +298,30 @@ def align_points(a, b):
 
 def np_rmsd(true, pred):
     '''Compute RMSD of coordinates after alignment using numpy
-    
+
     Args:
         true: Reference coordinates
         pred: Predicted coordinates to align
-        
+
     Returns:
         Root mean square deviation after optimal alignment
     '''
     # Center coordinates
     p = true - np.mean(true, axis=-2, keepdims=True)
     q = pred - np.mean(pred, axis=-2, keepdims=True)
-    
+
     # Get optimal rotation matrix and apply it
     p = p @ np_kabsch(p, q)
-    
+
     # Calculate RMSD
     return np.sqrt(np.mean(np.sum(np.square(p-q), axis=-1)) + 1e-8)
 
-    
+
 def min_k(x, k=1, mask=None):
     # Convert mask to boolean if it's not None
     if mask is not None:
         mask = mask.bool()  # Convert to boolean tensor
-    
+
     # Sort the tensor, replacing masked values with Nan
     y = torch.sort(x if mask is None else torch.where(mask, x, float('nan')))[0]
 
@@ -349,9 +349,9 @@ def get_con_loss(dgram, dgram_bins, num=None, seqsep=None, num_pos = float("inf"
 def _get_con_loss(dgram, dgram_bins, cutoff=None, binary=False):
     '''dgram to contacts'''
     if cutoff is None: cutoff = dgram_bins[-1]
-    bins = dgram_bins < cutoff  
+    bins = dgram_bins < cutoff
     px = torch.softmax(dgram, dim=-1)
-    px_ = torch.softmax(dgram - 1e7 * (~ bins), dim=-1)        
+    px_ = torch.softmax(dgram - 1e7 * (~ bins), dim=-1)
     # binary/categorical cross-entropy
     con_loss_cat_ent = -(px_ * torch.log_softmax(dgram, dim=-1)).sum(-1)
     con_loss_bin_ent = -torch.log((bins * px + 1e-8).sum(-1))
@@ -392,7 +392,7 @@ def _get_helix_loss(dgram, dgram_bins, offset=None, mask_2d=None, binary=False, 
         if mask_2d is None:
             return x.diagonal(offset=3).mean()
         else:
-            mask_2d = mask_2d.float() 
+            mask_2d = mask_2d.float()
             return (x * mask_2d).diagonal(offset=3, dim1=-2, dim2=-1).sum() / (torch.diagonal(mask_2d, offset=3, dim1=-2, dim2=-1).sum() + 1e-8)
 
     else:
@@ -434,7 +434,7 @@ def get_boltz_model(checkpoint: Optional[str] = None, predict_args=None, device:
         ema=False,
         structure_prediction_training=True,
         no_msa=False,
-        no_atom_encoder=False, 
+        no_atom_encoder=False,
     )
     return model_module
 
@@ -450,7 +450,7 @@ def boltz_hallucination(
     design_algorithm="3stages",
     recycling_steps=0,
     pre_iteration=20,
-    soft_iteration=50, 
+    soft_iteration=50,
     soft_iteration_1=50,
     soft_iteration_2=25,
     temp_iteration=50,
@@ -528,15 +528,15 @@ def boltz_hallucination(
                 msa = np.load(msa_id)
                 msas[chain.chain_id] = MSA(**msa)
 
-        input = Input(structure, msas) 
-        
+        input = Input(structure, msas)
+
         tokenizer = BoltzTokenizer()
         tokenized = tokenizer.tokenize(input)
         featurizer = BoltzFeaturizer()
 
         if pocket_conditioning:
             options = target.record.inference_options
-            binders, pocket = options.binders, options.pocket  
+            binders, pocket = options.binders, options.pocket
             batch = featurizer.process(
                         tokenized,
                         training=False,
@@ -567,10 +567,10 @@ def boltz_hallucination(
             batch['record'] = target.record
 
         return batch, structure
-    
+
     batch, structure = get_batch(target, max_seqs=msa_max_seqs, length=length, pocket_conditioning=pocket_conditioning)
     batch = {key: value.unsqueeze(0).to(device) for key, value in batch.items()}
-    
+
     ## initialize res_type_logits
     if pre_run:
         batch['res_type_logits'] = batch['res_type'].clone().detach().to(device).float()
@@ -582,7 +582,7 @@ def boltz_hallucination(
         batch['msa'] = batch['res_type_logits'].unsqueeze(0).to(device)
         batch['msa_paired'] = torch.ones(batch['res_type'].shape[0], 1, batch['res_type'].shape[1]).to(device)
         batch['deletion_value'] = torch.zeros(batch['res_type'].shape[0], 1, batch['res_type'].shape[1]).to(device)
-        batch['has_deletion'] = torch.full((batch['res_type'].shape[0], 1, batch['res_type'].shape[1]), False).to(device)  
+        batch['has_deletion'] = torch.full((batch['res_type'].shape[0], 1, batch['res_type'].shape[1]), False).to(device)
         batch['msa_mask'] = torch.ones(batch['res_type'].shape[0], 1, batch['res_type'].shape[1]).to(device)
         batch['profile'] = batch['msa'].float().mean(dim=0).to(device)
         batch['deletion_mean'] = torch.zeros(batch['deletion_mean'].shape).to(device)
@@ -593,15 +593,15 @@ def boltz_hallucination(
 
     def norm_seq_grad(grad, chain_mask):
         chain_mask = chain_mask.bool()
-        masked_grad = grad[:, chain_mask.squeeze(0), :] 
+        masked_grad = grad[:, chain_mask.squeeze(0), :]
         eff_L = (masked_grad.pow(2).sum(-1, keepdim=True) > 0).sum(-2, keepdim=True)
-        gn = masked_grad.norm(dim=(-1, -2), keepdim=True) 
+        gn = masked_grad.norm(dim=(-1, -2), keepdim=True)
         return grad * torch.sqrt(torch.tensor(eff_L)) / (gn + 1e-7)
 
     alphabet = list('XXARNDCQEGHILKMFPSTWYV-')
-    best_loss = float('inf')  
-    min_loss = float('inf') 
-    best_batch = None     
+    best_loss = float('inf')
+    min_loss = float('inf')
+    best_batch = None
     first_step_best_batch=None
 
     plots = []
@@ -616,9 +616,9 @@ def boltz_hallucination(
     mask = torch.ones_like(batch['res_type_logits'])
     mask[batch['entity_id']!=chain_to_number[binder_chain], :] = 0
     chain_mask = (batch['entity_id'] == chain_to_number[binder_chain]).int()
-    mid_points = torch.linspace(2, 22, 64).to(device) 
+    mid_points = torch.linspace(2, 22, 64).to(device)
 
-    def design(batch, 
+    def design(batch,
                iters = None,
                 soft=0.0, e_soft=None,
                 step=1.0, e_step=None,
@@ -704,19 +704,19 @@ def boltz_hallucination(
                     num_optimizing_binder_pos = 0 if pre_run else num_optimizing_binder_pos
                     i_con_loss = get_con_loss(pdist, mid_pts,
                                             num=num_inter_contacts, seqsep=0, num_pos=num_optimizing_binder_pos,
-                                            cutoff=inter_chain_cutoff, binary=False, 
+                                            cutoff=inter_chain_cutoff, binary=False,
                                             mask_1d=chain_mask, mask_1b=1-chain_mask)
                 else:
                     i_con_loss = get_con_loss(pdist, mid_pts,
                                             num=num_inter_contacts, seqsep=0,
-                                            cutoff=inter_chain_cutoff, binary=False, 
+                                            cutoff=inter_chain_cutoff, binary=False,
                                             mask_1d=chain_mask, mask_1b=1-chain_mask)
 
             else:
-            
+
                 i_con_loss = get_con_loss(pdist, mid_pts,
-                                        num=num_inter_contacts, seqsep=0, 
-                                        cutoff=inter_chain_cutoff, binary=False, 
+                                        num=num_inter_contacts, seqsep=0,
+                                        cutoff=inter_chain_cutoff, binary=False,
                                         mask_1d=1-chain_mask, mask_1b=chain_mask)
 
 
@@ -735,7 +735,7 @@ def boltz_hallucination(
                         'con_loss': con_loss,
                         'i_con_loss': i_con_loss,
                         'helix_loss': helix_loss
-                    }           
+                    }
 
             if not pre_run and not distogram_only:
                 plddt_loss = get_plddt_loss(dict_out['plddt'], mask_1d=chain_mask)
@@ -750,7 +750,7 @@ def boltz_hallucination(
                     'pae_loss': pae_loss,
                     'rg_loss': rg_loss
                 })
-                
+
                 plddt_loss_history.append(plddt_loss.item())
 
             bins = mid_points < 8.0
@@ -759,7 +759,7 @@ def boltz_hallucination(
             if loss_scales is None:
                 loss_scales = {
                     'con_loss': 1.0,
-                    'i_con_loss': 1.0, 
+                    'i_con_loss': 1.0,
                     'helix_loss': random.uniform(-0.4, 0.0),
                     'plddt_loss': 0.1,
                     'pae_loss': 0.4,
@@ -779,7 +779,7 @@ def boltz_hallucination(
             sequence_history.append(batch['res_type'][0, :, 2:22].detach().cpu().numpy())
 
             return total_loss, plots, loss_history, i_con_loss_history, con_loss_history, distogram_history, sequence_history, plddt_loss_history, loss_str, traj_coords, traj_plddt
-        
+
         def update_sequence(opt, batch, mask, alpha=2.0, non_protein_target=False, binder_chain='A'):
             batch["logits"] = alpha*batch['res_type_logits']
             X =  batch['logits']- torch.sum(torch.eye(batch['logits'].shape[-1])[[0,1,6,22,23,24,25,26,27,28,29,30,31,32]],dim=0).to(device)*(1e10)
@@ -789,7 +789,7 @@ def boltz_hallucination(
             batch['pseudo'] =  opt["soft"] * batch["soft"] + (1-opt["soft"]) * batch["res_type_logits"]
             batch['pseudo'] = opt["hard"] * batch["hard"] + (1-opt["hard"]) * batch["pseudo"]
             batch['res_type'] = batch['pseudo']*mask + batch['res_type_logits']*(1-mask)
-        
+
             if non_protein_target:
                 batch['msa'] = batch['res_type'].unsqueeze(0).to(device).detach()
                 batch['profile'] = batch['msa'].float().mean(dim=0).to(device).detach()
@@ -798,7 +798,7 @@ def boltz_hallucination(
                 batch['profile'][batch['entity_id']==chain_to_number[binder_chain],:] = batch['msa'][:, 0, (batch['entity_id']==chain_to_number[binder_chain])[0],:].float().mean(dim=1).to(device).detach()
 
             return batch
-        
+
         m = {"soft":[soft,e_soft],"temp":[temp,e_temp],"hard":[hard,e_hard], "step":[step,e_step], 'num_optimizing_binder_pos':[num_optimizing_binder_pos, e_num_optimizing_binder_pos]}
         m = {k:[s,(s if e is None else e)] for k,(s,e) in m.items()}
 
@@ -813,7 +813,7 @@ def boltz_hallucination(
                     v = (s+(e-s)*((i)/iters))
                     if k == "step": step = v
                     opt[k] = v
-                
+
             lr_scale = step * ((1 - opt["soft"]) + (opt["soft"] * opt["temp"]))
             num_optimizing_binder_pos = int(opt["num_optimizing_binder_pos"])
 
@@ -821,7 +821,7 @@ def boltz_hallucination(
                 param_group['lr'] = learning_rate * lr_scale
 
             opt["lr_rate"] = learning_rate * lr_scale
-                
+
             batch = update_sequence(opt, batch, mask, non_protein_target=non_protein_target, binder_chain=binder_chain)
             total_loss, plots, loss_history, i_con_loss_history, con_loss_history, distogram_history, sequence_history, plddt_loss_history, loss_str, traj_coords, traj_plddt = get_model_loss(batch, plots, loss_history, i_con_loss_history, con_loss_history, plddt_loss_history, distogram_history, sequence_history, pre_run, mask_ligand, distogram_only, predict_args, loss_scales, binder_chain, increasing_contact_over_itr, optimize_contact_per_binder_pos=optimize_contact_per_binder_pos, num_inter_contacts= num_inter_contacts, num_intra_contacts=num_intra_contacts, num_optimizing_binder_pos=num_optimizing_binder_pos, inter_chain_cutoff=inter_chain_cutoff, intra_chain_cutoff=intra_chain_cutoff, save_trajectory = save_trajectory)
             traj_coords_list.append(traj_coords)
@@ -840,7 +840,7 @@ def boltz_hallucination(
                 optimizer.zero_grad()
                 current_lr = optimizer.param_groups[0]['lr']
                 print(f"Epoch {i}: lr: {current_lr:.3f}, soft: {opt['soft']:.2f}, hard: {opt['hard']:.2f}, temp: {opt['temp']:.2f}, total loss: {total_loss.item():.2f}, {loss_str}")
-        
+
         return batch, plots, loss_history, i_con_loss_history, con_loss_history, plddt_loss_history, distogram_history, sequence_history, traj_coords_list, traj_plddt_list
 
     if pre_run:
@@ -870,7 +870,7 @@ def boltz_hallucination(
             print('-'*100)
             print(f"logits to softmax(T={e_soft_1})")
             print('-'*100)
-            batch, plots, loss_history, i_con_loss_history, con_loss_history, plddt_loss_history, distogram_history, sequence_history, traj_coords_list1, traj_plddt_list1 = design(batch, iters=soft_iteration_1, e_soft=e_soft_1, num_optimizing_binder_pos=1, e_num_optimizing_binder_pos=8, mask=mask, chain_mask=chain_mask, learning_rate=learning_rate, length=length, plots=plots, loss_history=loss_history, i_con_loss_history=i_con_loss_history, con_loss_history=con_loss_history, plddt_loss_history=plddt_loss_history, distogram_history=distogram_history, sequence_history=sequence_history, pre_run=pre_run, distogram_only=distogram_only, predict_args=predict_args, loss_scales=loss_scales, binder_chain=binder_chain, increasing_contact_over_itr=increasing_contact_over_itr, optimize_contact_per_binder_pos=optimize_contact_per_binder_pos, non_protein_target=non_protein_target, inter_chain_cutoff=inter_chain_cutoff, intra_chain_cutoff=intra_chain_cutoff, num_inter_contacts=num_inter_contacts, num_intra_contacts=num_intra_contacts, save_trajectory=save_trajectory) 
+            batch, plots, loss_history, i_con_loss_history, con_loss_history, plddt_loss_history, distogram_history, sequence_history, traj_coords_list1, traj_plddt_list1 = design(batch, iters=soft_iteration_1, e_soft=e_soft_1, num_optimizing_binder_pos=1, e_num_optimizing_binder_pos=8, mask=mask, chain_mask=chain_mask, learning_rate=learning_rate, length=length, plots=plots, loss_history=loss_history, i_con_loss_history=i_con_loss_history, con_loss_history=con_loss_history, plddt_loss_history=plddt_loss_history, distogram_history=distogram_history, sequence_history=sequence_history, pre_run=pre_run, distogram_only=distogram_only, predict_args=predict_args, loss_scales=loss_scales, binder_chain=binder_chain, increasing_contact_over_itr=increasing_contact_over_itr, optimize_contact_per_binder_pos=optimize_contact_per_binder_pos, non_protein_target=non_protein_target, inter_chain_cutoff=inter_chain_cutoff, intra_chain_cutoff=intra_chain_cutoff, num_inter_contacts=num_inter_contacts, num_intra_contacts=num_intra_contacts, save_trajectory=save_trajectory)
             print('-'*100)
             print(f"logits to softmax(T={e_soft_2})")
             print('-'*100)
@@ -890,7 +890,7 @@ def boltz_hallucination(
 
             traj_coords_list = traj_coords_list1 + traj_coords_list2 + traj_coords_list3 + traj_coords_list4 if save_trajectory else []
             traj_plddt_list = traj_plddt_list1 + traj_plddt_list2 + traj_plddt_list3 + traj_plddt_list4 if save_trajectory else []
-                
+
         elif design_algorithm == "logits":
             print('-'*100)
             print("logits")
@@ -910,7 +910,7 @@ def boltz_hallucination(
             num_plots = len(plots)
             num_rows = (num_plots + 5) // 6
             fig, axs = plt.subplots(num_rows, 6, figsize=(15, num_rows * 2.5))
-            
+
             if num_rows == 1:
                 axs = axs.reshape(1, -1)
 
@@ -951,7 +951,7 @@ def boltz_hallucination(
         if first_step_best_batch is not None:
             best_batch = first_step_best_batch
         else:
-            best_batch = batch  
+            best_batch = batch
 
     predict_args = {
     "recycling_steps": 3,  # Default value
@@ -1008,7 +1008,7 @@ def boltz_hallucination(
             data['sequences'][chain_to_number[binder_chain]]['protein']['sequence'] = mutated_sequence
             best_batch, _, _, _ = _update_batches(data, data_apo)
             output = _run_model(boltz_model, best_batch, predict_args)
-            
+
             iptm = output['iptm'].detach().cpu().numpy()
             confidence_score.append(iptm)
             mutated_sequence_ls.append(mutated_sequence)
@@ -1016,7 +1016,7 @@ def boltz_hallucination(
 
         best_id = np.argmax(confidence_score)
         best_iptm = confidence_score[best_id]
-        
+
         if best_iptm > prev_iptm:
             best_seq = mutated_sequence_ls[best_id]
             for seq_data in [data, data_apo]:
@@ -1055,7 +1055,7 @@ def run_boltz_design(
 ):
     """
     Run Boltz protein design pipeline.
-    
+
     Args:
         main_dir (str): Main directory path
         yaml_dir (str): Directory containing input yaml files
@@ -1066,7 +1066,7 @@ def run_boltz_design(
         config = {
             'recycling_steps': 0,
             'pre_iteration': 30,
-            'soft_iteration': 75, 
+            'soft_iteration': 75,
             'soft_iteration_1': 50,
             'soft_iteration_2': 25,
             'temp_iteration': 45,
@@ -1107,7 +1107,7 @@ def run_boltz_design(
 
     with open(os.path.expanduser(ccd_path), 'rb') as f:
         ccd_lib = pickle.load(f)
-    
+
     results_final_dir = os.path.join(version_dir, 'results_final')
     results_yaml_dir = os.path.join(version_dir, 'results_yaml')
     results_final_dir_apo = os.path.join(version_dir, 'results_final_apo')
@@ -1126,7 +1126,7 @@ def run_boltz_design(
     alphabet = list('XXARNDCQEGHILKMFPSTWYV-')
     rmsd_csv_path = os.path.join(results_final_dir, 'rmsd_results.csv')
     csv_exists = os.path.exists(rmsd_csv_path)
-    filtered_config = {k: v for k, v in config.items() 
+    filtered_config = {k: v for k, v in config.items()
                 if k not in ['helix_loss_min', 'helix_loss_max', 'length_min', 'length_max']}
     for yaml_path in Path(yaml_dir).glob('*.yaml'):
         if yaml_path.name.endswith('.yaml'):
@@ -1148,7 +1148,7 @@ def run_boltz_design(
                         chain_to_number=chain_to_number,
                         save_trajectory=save_trajectory
                     )
-                    print('warm up done')     
+                    print('warm up done')
                     output, output_apo, best_batch, best_batch_apo, best_structure, best_structure_apo ,distogram_history_2, sequence_history_2, loss_history_2, con_loss_history, i_con_loss_history, plddt_loss_history, traj_coords_list_2, traj_plddt_list_2, structure = boltz_hallucination(
                         boltz_model,
                         yaml_path,
@@ -1161,16 +1161,16 @@ def run_boltz_design(
                         save_trajectory=save_trajectory
                     )
                     loss_history.extend(loss_history_2)
-                    distogram_history.extend(distogram_history_2) 
+                    distogram_history.extend(distogram_history_2)
                     sequence_history.extend(sequence_history_2)
                     traj_coords_list.extend(traj_coords_list_2)
                     traj_plddt_list.extend(traj_plddt_list_2)
 
                     if save_trajectory:
                         from logmd import LogMD
-                        logmd = LogMD() 
+                        logmd = LogMD()
                         logmd.notebook()
-                        print(logmd.url) 
+                        print(logmd.url)
                         atoms = structure.atoms
                         ref_coords = traj_coords_list[-1][:atoms['coords'].shape[0], :]
                         for i in range(len(traj_coords_list)):
@@ -1196,7 +1196,7 @@ def run_boltz_design(
                     rmsd = np_rmsd(ca_coords, ca_coords_apo)
                     print('-' * 100)
                     print("rmsd", rmsd)
-                    print('-' * 100) 
+                    print('-' * 100)
 
                     if loss_dir:
                         os.makedirs(loss_dir, exist_ok=True)
@@ -1206,34 +1206,34 @@ def run_boltz_design(
                         plt.style.use('dark_background')
                         fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(12,4))
                         fig.patch.set_facecolor('#1C1C1C')
-                        
+
                         # Custom colors for each plot
                         colors = ['#00ff99', '#ff3366', '#3366ff']
-                        
+
                         # Plot 1: Training Loss
                         ax1.plot(loss_history, color=colors[0], linewidth=2)
                         ax1.set_xlabel('Epochs', fontsize=12)
                         ax1.set_ylabel('Total Loss', fontsize=12)
                         ax1.set_title('Total Loss History', fontsize=14, pad=15)
                         ax1.grid(True, linestyle='--', alpha=0.3)
-                        
+
                         # Plot 2: Con Loss
                         ax2.plot(con_loss_history, color=colors[1], linewidth=2)
                         ax2.set_xlabel('Epochs', fontsize=12)
                         ax2.set_ylabel('Intra-Contact Loss', fontsize=12)
                         ax2.set_title('Intra-Contact Loss History', fontsize=14, pad=15)
                         ax2.grid(True, linestyle='--', alpha=0.3)
-                        
+
                         # Plot 3: iCon Loss
                         ax3.plot(i_con_loss_history, color=colors[2], linewidth=2)
                         ax3.set_xlabel('Epochs', fontsize=12)
                         ax3.set_ylabel('Inter-Contact Loss', fontsize=12)
                         ax3.set_title('Inter-Contact Loss History', fontsize=14, pad=15)
                         ax3.grid(True, linestyle='--', alpha=0.3)
-                        
+
                         # Adjust layout and add spacing between subplots
                         plt.tight_layout(pad=3.0)
-                        
+
                         if loss_dir:
                             plt.savefig(os.path.join(loss_dir, f'{target_binder_input}_loss_history_itr{itr + 1}_length{config["length"]}.png'),
                                       facecolor='#1C1C1C', edgecolor='none', bbox_inches='tight', dpi=300)
@@ -1258,7 +1258,7 @@ def run_boltz_design(
                     best_batch_cpu = {k: v.detach().cpu().numpy() if torch.is_tensor(v) else v for k, v in best_batch.items()}
                     best_sequence = ''.join([alphabet[i] for i in np.argmax(best_batch_cpu['res_type'][best_batch_cpu['entity_id']==chain_to_number[config['binder_chain']],:], axis=-1)])
                     print("best_sequence", best_sequence)
-                    
+
 
                     shutil.copy2(yaml_path, result_yaml)
                     with open(result_yaml, 'r') as f:
@@ -1279,13 +1279,13 @@ def run_boltz_design(
                     with open(result_yaml_apo, 'r') as f:
                         data_apo = yaml.safe_load(f)
                     data_apo['sequences'] = [data_apo['sequences'][chain_to_number[config['binder_chain']]]]
-                    data_apo.pop('constraints', None)   
+                    data_apo.pop('constraints', None)
 
                     with open(result_yaml_apo, 'w') as f:
                         yaml.dump(data_apo, f)
 
                     if redo_boltz_predict:
-                        subprocess.run([boltz_path, 'predict', str(result_yaml), '--out_dir', str(results_final_dir), '--write_full_pae'])                     
+                        subprocess.run([boltz_path, 'predict', str(result_yaml), '--out_dir', str(results_final_dir), '--write_full_pae'])
                         subprocess.run([boltz_path, 'predict', str(result_yaml_apo), '--out_dir', str(results_final_dir_apo), '--write_full_pae'])
                     else:
                         save_confidence_scores(results_final_dir, output, best_structure, f"{target_binder_input}_results_itr{itr + 1}_length{config['length']}", 0)

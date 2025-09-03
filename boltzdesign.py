@@ -65,7 +65,7 @@ Examples:
   python boltzdesign_generalized.py --target_name 5zmc --target_type dna --pdb_target_ids C,D --target_mols SAM --binder_id A
         """
     )
-    
+
     # Required arguments
     parser.add_argument('--target_name', type=str, required=True,
                         help='Target name/PDB code (e.g., 5zmc)')
@@ -92,7 +92,7 @@ Examples:
                         help='Maximum MSA sequences')
     parser.add_argument('--suffix', type=str, default='0',
                         help='Suffix for the output directory')
-    
+
     # Modifications
     parser.add_argument('--modifications', type=str, default='',
                         help='Modifications (comma-separated, e.g., "SEP,SEP")')
@@ -102,7 +102,7 @@ Examples:
                         help='Modification positions (comma-separated, matching order)')
     parser.add_argument('--modification_target', type=str, default='',
                         help='Target ID for modifications (e.g., "A")')
-    
+
     # Constraints
     parser.add_argument('--constraint_target', type=str, default='',
                         help='Target ID for constraints (e.g., "A")')
@@ -116,7 +116,7 @@ Examples:
                         help='Maximum binder length')
     parser.add_argument('--optimizer_type', type=str, choices=['SGD', 'AdamW'], default='SGD',
                         help='Optimizer type')
-    
+
     # Iteration parameters
     parser.add_argument('--pre_iteration', type=int, default=30,
                         help='Pre-iteration steps')
@@ -130,7 +130,7 @@ Examples:
                         help='Semi-greedy steps')
     parser.add_argument('--recycling_steps', type=int, default=0,
                         help='Recycling steps')
-    
+
     # Advanced configuration
     parser.add_argument('--use_default_config', type=str2bool, default=True,
                         help='Use default configuration (recommended)')
@@ -140,11 +140,11 @@ Examples:
                         help='Optimize interface contact per binder position')
     parser.add_argument('--distogram_only', type=str2bool, default=True,
                         help='Only use distogram for optimization')
-    parser.add_argument('--design_algorithm', type=str, choices=['3stages', '3stages_extra'], 
+    parser.add_argument('--design_algorithm', type=str, choices=['3stages', '3stages_extra'],
                         default='3stages', help='Design algorithm')
     parser.add_argument('--learning_rate', type=float, default=0.1,
                         help='Learning rate for optimization')
-    parser.add_argument('--learning_rate_pre', type=float, default=0.1, 
+    parser.add_argument('--learning_rate_pre', type=float, default=0.1,
                         help='Learning rate for pre iterations (warm-up stage)')
     parser.add_argument('--e_soft', type=float, default=0.8,
                         help='Softmax temperature for 3stages')
@@ -152,7 +152,7 @@ Examples:
                         help='Initial softmax temperature for 3stages_extra')
     parser.add_argument('--e_soft_2', type=float, default=1.0,
                         help='Additional softmax temperature for 3stages_extra')
-    
+
     # Interaction parameters
     parser.add_argument('--inter_chain_cutoff', type=int, default=20,
                         help='Inter-chain distance cutoff')
@@ -162,7 +162,7 @@ Examples:
                         help='Number of inter-chain contacts')
     parser.add_argument('--num_intra_contacts', type=int, default=2,
                         help='Number of intra-chain contacts')
-    
+
 
     # loss parameters
     parser.add_argument('--con_loss', type=float, default=1.0,
@@ -182,7 +182,7 @@ Examples:
     parser.add_argument('--helix_loss_min', type=float, default=-0.3,
                         help='Minimum helix loss weights')
 
-    
+
     # LigandMPNN parameters
     parser.add_argument('--num_designs', type=int, default=2,
                         help='Number of designs per PDB for LigandMPNN')
@@ -192,7 +192,7 @@ Examples:
                         help='iPTM cutoff for redesign')
     parser.add_argument('--complex_plddt_cutoff', type=float, default=0.7,
                         help='Complex pLDDT cutoff for high confidence designs')
-    
+
     # System configuration
     parser.add_argument('--gpu_id', type=int, default=0,
                         help='GPU ID to use')
@@ -252,7 +252,7 @@ class YamlConfig:
         self.PDB_DIR = self.MAIN_DIR / 'PDB'
         self.MSA_DIR = self.MAIN_DIR / 'MSA'
         self.YAML_DIR = self.MAIN_DIR / 'yaml'
-    
+
     def setup_directories(self):
         """Create necessary directories if they don't exist."""
         for directory in [self.MAIN_DIR, self.PDB_DIR, self.MSA_DIR, self.YAML_DIR]:
@@ -269,7 +269,7 @@ def load_boltz_model(args, device):
         "write_full_pae": False,
         "write_full_pde": False,
     }
-    
+
     boltz_model = get_boltz_model(args.boltz_checkpoint, predict_args, device)
     boltz_model.train()
     return boltz_model, predict_args
@@ -284,7 +284,7 @@ def load_design_config(target_type, work_dir):
     script_dir = os.path.dirname(os.path.abspath(__file__))
     # The configs directory is under script_dir/boltzdesign/configs/
     config_dir = os.path.join(script_dir, 'boltzdesign', 'configs')
-    
+
     if target_type=='small_molecule':
         config_path = os.path.join(config_dir, "default_sm_config.yaml")
     elif target_type=='metal':
@@ -296,11 +296,11 @@ def load_design_config(target_type, work_dir):
         config_path = os.path.join(config_dir, "default_ppi_config.yaml")
     else:
         raise ValueError(f"Unknown target type: {target_type}")
-    
+
     print(f"Loading config from: {config_path}")
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
-    
+
     return config
 
 
@@ -328,12 +328,12 @@ def update_config_with_args(config, args):
     # Update basic parameters
     explicit_args = get_explicit_args()
     config.update(basic_params)
-    
+
     # For advanced parameters, only update those that are explicitly set by the user
     # (i.e., different from their default values in argparse)
     parser = argparse.ArgumentParser()
     _, defaults = parser.parse_known_args([])  # Get default values
-    
+
     advanced_params = {
         'mask_ligand': args.mask_ligand,
         'optimize_contact_per_binder_pos': args.optimize_contact_per_binder_pos,
@@ -367,11 +367,11 @@ def update_config_with_args(config, args):
             print(f"Updating {param_name} to {param_value}")
             config[param_name] = param_value
     return config
-    
+
 def run_boltz_design_step(args, config, boltz_model, yaml_dir, main_dir, version_name):
     """Run the Boltz design step"""
     print("Starting Boltz design step...")
-    
+
     loss_scales = {
         'con_loss': args.con_loss,
         'i_con_loss': args.i_con_loss,
@@ -380,11 +380,11 @@ def run_boltz_design_step(args, config, boltz_model, yaml_dir, main_dir, version
         'i_pae_loss': args.i_pae_loss,
         'rg_loss': args.rg_loss,
     }
-    
+
     boltz_path = shutil.which("boltz")
     if boltz_path is None:
         raise FileNotFoundError("The 'boltz' command was not found in the system PATH.")
-    
+
     run_boltz_design(
         boltz_path=boltz_path,
         main_dir=main_dir,
@@ -399,7 +399,7 @@ def run_boltz_design_step(args, config, boltz_model, yaml_dir, main_dir, version
         save_trajectory=args.save_trajectory,
         redo_boltz_predict=args.redo_boltz_predict,
     )
-    
+
     print("Boltz design step completed!")
 
 def run_ligandmpnn_step(args, main_dir, version_name, ligandmpnn_dir, yaml_dir, work_dir):
@@ -409,25 +409,25 @@ def run_ligandmpnn_step(args, main_dir, version_name, ligandmpnn_dir, yaml_dir, 
     yaml_path = f"{work_dir}/LigandMPNN/run_ligandmpnn_logits_config.yaml"
     with open(yaml_path, "r") as f:
         mpnn_config = yaml.safe_load(f)
-    
+
     for key, value in mpnn_config.items():
         if isinstance(value, str) and "${CWD}" in value:
             mpnn_config[key] = value.replace("${CWD}", work_dir)
-    
+
     if not Path(mpnn_config["checkpoint_soluble_mpnn"]).exists():
         raise FileNotFoundError("LigandMPNN checkpoint file not found!")
-    
+
     with open(yaml_path, "w") as f:
         yaml.dump(mpnn_config, f, default_flow_style=False)
-    
+
     # Setup directories
     boltzdesign_dir = f"{main_dir}/{version_name}/results_final"
     pdb_save_dir = f"{main_dir}/{version_name}/pdb"
-    
+
     lmpnn_redesigned_dir = os.path.join(ligandmpnn_dir, '01_lmpnn_redesigned')
     lmpnn_redesigned_fa_dir = os.path.join(ligandmpnn_dir, '01_lmpnn_redesigned_fa')
     lmpnn_redesigned_yaml_dir = os.path.join(ligandmpnn_dir, '01_lmpnn_redesigned_yaml')
-    
+
     os.makedirs(ligandmpnn_dir, exist_ok=True)
     # Convert CIF to PDB and run LigandMPNN
     convert_cif_files_to_pdb(boltzdesign_dir, pdb_save_dir, high_iptm=args.high_iptm, i_ptm_cutoff=args.i_ptm_cutoff)
@@ -435,7 +435,7 @@ def run_ligandmpnn_step(args, main_dir, version_name, ligandmpnn_dir, yaml_dir, 
     if not any(f.endswith('.pdb') for f in os.listdir(pdb_save_dir)):
         print("No successful designs from BoltzDesign")
         sys.exit(1)
-    
+
     run_ligandmpnn_redesign(
         ligandmpnn_dir, pdb_save_dir, shutil.which("boltz"),
         os.path.dirname(yaml_dir), yaml_path, top_k=args.num_designs, cutoff=args.cutoff,
@@ -443,58 +443,58 @@ def run_ligandmpnn_step(args, main_dir, version_name, ligandmpnn_dir, yaml_dir, 
         target_chains="all", out_dir=lmpnn_redesigned_fa_dir,
         lmpnn_yaml_dir=lmpnn_redesigned_yaml_dir, results_final_dir=lmpnn_redesigned_dir
     )
-    
+
     # Filter high confidence designs
     filter_high_confidence_designs(args, ligandmpnn_dir, lmpnn_redesigned_dir, lmpnn_redesigned_yaml_dir)
-    
+
     print("LigandMPNN redesign step completed!")
     return ligandmpnn_dir
 
 def filter_high_confidence_designs(args, ligandmpnn_dir, lmpnn_redesigned_dir, lmpnn_redesigned_yaml_dir):
     """Filter and save high confidence designs"""
     print("Filtering high confidence designs...")
-    
+
     yaml_dir_success_designs_dir = os.path.join(ligandmpnn_dir, '01_lmpnn_redesigned_high_iptm')
     yaml_dir_success_boltz_yaml = os.path.join(yaml_dir_success_designs_dir, 'yaml')
     yaml_dir_success_boltz_cif = os.path.join(yaml_dir_success_designs_dir, 'cif')
-    
+
     os.makedirs(yaml_dir_success_boltz_yaml, exist_ok=True)
     os.makedirs(yaml_dir_success_boltz_cif, exist_ok=True)
-    
+
     successful_designs = 0
-    
+
     # Process designs
     for root in os.listdir(lmpnn_redesigned_dir):
         root_path = os.path.join(lmpnn_redesigned_dir, root, 'predictions')
         if not os.path.isdir(root_path):
             continue
-        
+
         for subdir in os.listdir(root_path):
             json_path = os.path.join(root_path, subdir, f'confidence_{subdir}_model_0.json')
             yaml_path = os.path.join(lmpnn_redesigned_yaml_dir, f'{subdir}.yaml')
             cif_path = os.path.join(lmpnn_redesigned_dir, f'boltz_results_{subdir}', 'predictions', subdir, f'{subdir}_model_0.cif')
-            
+
             try:
                 with open(json_path, 'r') as f:
                     data = json.load(f)
-                
+
                 design_name = json_path.split('/')[-2]
                 length = int(subdir[subdir.find('length') + 6:subdir.find('_model')])
                 iptm = data.get('iptm', 0)
                 complex_plddt = data.get('complex_plddt', 0)
-                
+
                 print(f"{design_name} length: {length} complex_plddt: {complex_plddt:.2f} iptm: {iptm:.2f}")
-                
+
                 if iptm > args.i_ptm_cutoff and complex_plddt > args.complex_plddt_cutoff:
                     shutil.copy(yaml_path, os.path.join(yaml_dir_success_boltz_yaml, f'{subdir}.yaml'))
                     shutil.copy(cif_path, os.path.join(yaml_dir_success_boltz_cif, f'{subdir}.cif'))
                     print(f"✅ {design_name} copied")
                     successful_designs += 1
-            
+
             except (KeyError, FileNotFoundError, json.JSONDecodeError) as e:
                 print(f"Skipping {subdir}: {e}")
                 continue
-    
+
     if successful_designs == 0:
         print("Error: No LigandMPNN/ProteinMPNN redesigned designs passed the confidence thresholds")
         sys.exit(1)
@@ -502,7 +502,7 @@ def filter_high_confidence_designs(args, ligandmpnn_dir, lmpnn_redesigned_dir, l
 
 def calculate_holo_apo_rmsd(af_pdb_dir, af_pdb_dir_apo, binder_chain):
     """Calculate RMSD between holo and apo structures and update confidence CSV.
-    
+
     Args:
         af_pdb_dir (str): Directory containing holo PDB files
         af_pdb_dir_apo (str): Directory containing apo PDB files
@@ -520,8 +520,8 @@ def calculate_holo_apo_rmsd(af_pdb_dir, af_pdb_dir_apo, binder_chain):
                 df_confidence_csv.loc[df_confidence_csv['file'] == pdb_name.split('.pdb')[0]+'.cif', 'rmsd'] = rmsd
                 print(f"{pdb_path} rmsd: {rmsd}")
         df_confidence_csv.to_csv(confidence_csv_path, index=False)
-        
-        
+
+
 def run_alphafold_step(args, ligandmpnn_dir, work_dir, mod_to_wt_aa):
     """Run AlphaFold validation step"""
     print("Starting AlphaFold validation step...")
@@ -532,19 +532,19 @@ def run_alphafold_step(args, ligandmpnn_dir, work_dir, mod_to_wt_aa):
     print("alphafold_dir", alphafold_dir)
     print("afdb_dir", afdb_dir)
     print("hmmer_path", hmmer_path)
-    
+
     # Create AlphaFold directories
     af_input_dir = f'{ligandmpnn_dir}/02_design_json_af3'
     af_output_dir = f'{ligandmpnn_dir}/02_design_final_af3'
     af_input_apo_dir = f'{ligandmpnn_dir}/02_design_json_af3_apo'
     af_output_apo_dir = f'{ligandmpnn_dir}/02_design_final_af3_apo'
-    
+
     for dir_path in [af_input_dir, af_output_dir, af_input_apo_dir, af_output_apo_dir]:
         os.makedirs(dir_path, exist_ok=True)
-    
+
     # Process YAML files
     yaml_dir_success_boltz_yaml = os.path.join(ligandmpnn_dir, '01_lmpnn_redesigned_high_iptm', 'yaml')
-    
+
     process_yaml_files(
         yaml_dir_success_boltz_yaml,
         af_input_dir,
@@ -564,7 +564,7 @@ def run_alphafold_step(args, ligandmpnn_dir, work_dir, mod_to_wt_aa):
         alphafold_dir,
         args.af3_docker_name
     ], check=True)
-    
+
     # Run AlphaFold on apo state
     subprocess.run([
         f'{work_dir}/boltzdesign/alphafold.sh',
@@ -574,12 +574,12 @@ def run_alphafold_step(args, ligandmpnn_dir, work_dir, mod_to_wt_aa):
         alphafold_dir,
         args.af3_docker_name
     ], check=True)
-    
+
     print("AlphaFold validation step completed!")
 
     af_pdb_dir = f"{ligandmpnn_dir}/03_af_pdb_success"
     af_pdb_dir_apo = f"{ligandmpnn_dir}/03_af_pdb_apo"
-    
+
     convert_cif_files_to_pdb(af_output_dir, af_pdb_dir, af_dir=True, high_iptm=args.high_iptm)
     if not any(f.endswith('.pdb') for f in os.listdir(af_pdb_dir)):
         print("No successful designs from AlphaFold")
@@ -594,7 +594,7 @@ def run_rosetta_step(args, ligandmpnn_dir, af_output_dir, af_output_apo_dir, af_
     if args.target_type != 'protein':
         print("Skipping Rosetta step (not a protein target)")
         return
-    
+
     print("Starting Rosetta energy calculation...")
     af_pdb_rosetta_success_dir = f"{ligandmpnn_dir}/af_pdb_rosetta_success"
     from pyrosetta_utils import measure_rosetta_energy
@@ -602,7 +602,7 @@ def run_rosetta_step(args, ligandmpnn_dir, af_output_dir, af_output_apo_dir, af_
         af_pdb_dir, af_pdb_dir_apo, af_pdb_rosetta_success_dir,
         binder_holo_chain=args.binder_id, binder_apo_chain='A'
     )
-    
+
     print("Rosetta energy calculation completed!")
 
 def setup_environment():
@@ -618,7 +618,7 @@ def setup_environment():
 def get_target_ids(args):
     """Get target IDs from either PDB or custom input"""
     target_ids = args.pdb_target_ids if args.input_type == "pdb" else args.custom_target_ids
-    
+
     if (args.contact_residues or args.modifications) and not target_ids:
         input_type = "PDB" if args.input_type == "pdb" else "Custom"
         raise ValueError(f"{input_type} target IDs must be provided when using contacts or modifications")
@@ -636,7 +636,7 @@ def initialize_pipeline(args):
     """Initialize models and configurations"""
     work_dir = args.work_dir or os.getcwd()
     boltz_model, _ = load_boltz_model(args, torch.device("cuda:0" if torch.cuda.is_available() else "cpu"))
-    
+
     config_obj = YamlConfig(main_dir=f'{work_dir}/inputs/{args.target_type}_{args.target_name}_{args.suffix}')
     config_obj.setup_directories()
     return boltz_model, config_obj
@@ -684,7 +684,7 @@ def generate_yaml_config(args, config_obj):
         target = target_inputs or [args.target_name]
 
     return generate_yaml_for_target_binder(
-        args.target_name, 
+        args.target_name,
         args.target_type,
         target,
         config=config_obj,
@@ -722,14 +722,14 @@ def modification_to_wt_aa(modifications, modifications_wt):
 def run_pipeline_steps(args, config, boltz_model, yaml_dir, output_dir):
     """Run the pipeline steps based on arguments"""
     results = {'ligandmpnn_dir': f"{output_dir['main_dir']}/{output_dir['version']}/ligandmpnn_cutoff_{args.cutoff}", 'af_output_dir': None, 'af_output_apo_dir': None, 'af_pdb_dir': None, 'af_pdb_dir_apo': None}
-    
+
     if args.run_boltz_design:
-        run_boltz_design_step(args, config, boltz_model, yaml_dir, 
+        run_boltz_design_step(args, config, boltz_model, yaml_dir,
                             output_dir['main_dir'], output_dir['version'])
 
     if args.run_ligandmpnn:
         run_ligandmpnn_step(
-            args, output_dir['main_dir'], output_dir['version'], 
+            args, output_dir['main_dir'], output_dir['version'],
             results['ligandmpnn_dir'], yaml_dir, args.work_dir or os.getcwd()
         )
     if args.run_alphafold:
@@ -737,11 +737,11 @@ def run_pipeline_steps(args, config, boltz_model, yaml_dir, output_dir):
         results['af_output_dir'], results['af_output_apo_dir'], results['af_pdb_dir'], results['af_pdb_dir_apo'] = run_alphafold_step(
             args, results['ligandmpnn_dir'], args.work_dir or os.getcwd(), mod_to_wt_aa
         )
-    
+
     if args.run_rosetta:
-        run_rosetta_step(args, results['ligandmpnn_dir'], 
+        run_rosetta_step(args, results['ligandmpnn_dir'],
                         results['af_output_dir'], results['af_output_apo_dir'], results['af_pdb_dir'], results['af_pdb_dir_apo'])
-    
+
     return results
 
 def main():
@@ -758,20 +758,20 @@ def main():
                 print(f"    - {item}")
         else:
             print(f"  {key}: {value}")
-    
+
     # Setup pipeline configuration
     config = setup_pipeline_config(args)
     output_dir = setup_output_directories(args)
-    
+
     # Run pipeline steps
     print("config:")
     items = list(config.items())
     max_key_len = max(len(key) for key, _ in items)
     max_val_len = max(len(str(val)) for _, val in items)
-    
+
     # Print header
     print("  " + "=" * (max_key_len + max_val_len + 5))
-    
+
     # Print items in two columns
     for i in range(0, len(items), 2):
         key1, value1 = items[i]
@@ -781,10 +781,10 @@ def main():
                   f"{key2:<{max_key_len}}: {value2}")
         else:
             print(f"  {key1:<{max_key_len}}: {value1}")
-    
+
     print("  " + "=" * (max_key_len + max_val_len + 5))
     results = run_pipeline_steps(args, config, boltz_model, yaml_dir, output_dir)
-    
+
     print("Pipeline completed successfully!")
 
 

@@ -22,7 +22,7 @@ if project_root not in sys.path:
 if ligandmpnn_path not in sys.path:
     sys.path.append(ligandmpnn_path)
 
-from run import main
+from LigandMPNN.run import main
 
 chain_to_number = {
     'A': 0,
@@ -74,7 +74,7 @@ def rename_chains(structure):
     """
     next_chain = 0
     chainmap = {c.id: c.id for c in structure.get_chains() if len(c.id) == 1}
-    
+
     for o in structure.get_chains():
         if len(o.id) != 1:
             if o.id[0] not in chainmap:
@@ -143,7 +143,7 @@ def convert_cif_to_pdb(ciffile, pdbfile):
 def convert_cif_files_to_pdb(results_dir, save_dir, af_dir=False, high_iptm=False, i_ptm_cutoff = 0.5):
     """
     Convert all .cif files in results_dir to .pdb format and save in save_dir
-    
+
     Args:
         results_dir (str): Directory containing .cif files
         save_dir (str): Directory to save converted .pdb files
@@ -158,7 +158,7 @@ def convert_cif_files_to_pdb(results_dir, save_dir, af_dir=False, high_iptm=Fals
                     cif_path = os.path.join(root, file)
                     pdb_path = os.path.join(save_dir, file.replace('.cif', '.pdb'))
                     print(f"Converting {cif_path}")
-                    
+
                     if high_iptm:
                         confidence_file_summary = [os.path.join(root, f) for f in os.listdir(root) if f.endswith('summary_confidences.json')][0]
                         confidence_file = [os.path.join(root, f) for f in os.listdir(root) if f.endswith('_confidences.json') and not f.endswith('summary_confidences.json')][0]
@@ -169,15 +169,15 @@ def convert_cif_files_to_pdb(results_dir, save_dir, af_dir=False, high_iptm=Fals
                         with open(confidence_file, 'r') as f:
                             confidence_data = json.load(f)
                             plddt = np.mean(confidence_data['atom_plddts'])
-                            
+
                         if iptm > i_ptm_cutoff:
-                            print(f"Converting {cif_path}") 
+                            print(f"Converting {cif_path}")
                             print(f"iptm score: {iptm}")
                             print(f"pdb_path: {pdb_path}")
                             convert_cif_to_pdb(cif_path, pdb_path)
                             confidence_scores.append({'file': file, 'iptm': iptm, 'plddt': plddt})
 
-                    else:  
+                    else:
                         print(f"Converting {cif_path}")
                         convert_cif_to_pdb(cif_path, pdb_path)
             else:
@@ -198,11 +198,11 @@ def convert_cif_files_to_pdb(results_dir, save_dir, af_dir=False, high_iptm=Fals
                                 print(f"Confidence file: {confidence_file}")
                                 print(f"iptm score: {iptm}")
                                 convert_cif_to_pdb(cif_path, pdb_path)
-                        
+
                     else:
                         print(f"Converting {cif_path}")
                         convert_cif_to_pdb(cif_path, pdb_path)
-                        
+
             if confidence_scores:
                 confidence_scores_path = os.path.join(save_dir, 'high_iptm_confidence_scores.csv')
                 pd.DataFrame(confidence_scores).to_csv(confidence_scores_path, index=False)
@@ -212,37 +212,37 @@ def convert_cif_files_to_pdb(results_dir, save_dir, af_dir=False, high_iptm=Fals
 def get_protein_ligand_interface(pdb_id, cutoff=6, non_protein_target=True, binder_chain='A', target_chain='B'):
     """
     Get interface residues between a protein and ligand/target from a PDB structure.
-    
+
     Args:
         pdb_id (str): Path to PDB file
         cutoff (float): Distance cutoff in Angstroms for interface residues
         non_protein_target (bool): Whether to select non-protein ligand (True) or protein target chain (False)
         binder_chain (str): Chain ID of the protein binder chain
         target_chain (str): Chain ID of the target protein chain (if non_protein_target=False)
-    
+
     Returns:
         list: Residue indices that are at the interface
     """
     # Load PDB structure
     pdb = parsePDB(pdb_id)
-    
+
     # Get binder protein coordinates
     protein = pdb.select(f'protein and chain {binder_chain} and name CA')
     protein_coords = protein.getCoords()
-    
+
     # Get ligand/target coordinates
     if non_protein_target:
         ligand = pdb.select('not protein and not water')
     else:
         ligand = pdb.select(f'protein and chain {target_chain} and name CA')
-        
+
     ligand_coords = ligand.getCoords()
-    
+
     # Calculate pairwise distances and find interface residues
     distances = np.sqrt(np.sum((protein_coords[:,None,:] - ligand_coords[None,:,:])**2, axis=-1))
     interacting = distances < cutoff
     interface_residues = list(np.nonzero(np.sum(interacting, axis=-1))[0])
-    
+
     return interface_residues
 
 def get_protein_ligand_interface_all_atom(pdb_id, cutoff=6, non_protein_target=True, binder_chain='A', target_chains="all"):
@@ -255,55 +255,55 @@ def get_protein_ligand_interface_all_atom(pdb_id, cutoff=6, non_protein_target=T
         non_protein_target (bool): Whether to select non-protein ligand (True) or protein target chain (False)
         binder_chain (str): Chain ID of the protein binder chain
         target_chains (list): Chain IDs of the target protein chains (if non_protein_target=False). If None, all chains except binder_chain are used.
-    
+
     Returns:
         list: Residue indices that are at the interface
     """
     # Load PDB structure
     pdb = parsePDB(pdb_id)
-    
+
     # Get binder protein coordinates
     protein = pdb.select(f'protein and chain {binder_chain}')
     protein_residues = set(protein.getResnums())
-    
+
 
     if non_protein_target:
         ligand = pdb.select('not protein and not water')
         ligand_atoms = ligand.getCoords()
         protein_atoms = protein.getCoords()
-        
+
         distances = np.sqrt(np.sum((protein_atoms[:,None,:] - ligand_atoms[None,:,:])**2, axis=-1))
         interacting = distances < cutoff
-        
+
         interface_residues = set()
         for i in range(len(protein)):
             if np.any(interacting[i]):
                 interface_residues.add(protein.getResnums()[i])
-                
+
     else:
         if target_chains == "all":
             all_chains = set([chain.getChid() for chain in pdb.select('protein').getHierView().iterChains()])
             target_chains = list(all_chains - {binder_chain})
             print("target_chains", target_chains)
-            
+
         interface_residues = set()
         for target_chain in target_chains:
             ligand = pdb.select(f'protein and chain {target_chain}')
             ligand_atoms = ligand.getCoords()
             protein_atoms = protein.getCoords()
-            
+
             # Calculate all atom distances
             distances = np.sqrt(np.sum((protein_atoms[:,None,:] - ligand_atoms[None,:,:])**2, axis=-1))
             interacting = distances < cutoff
-            
+
             # Map interacting atoms back to residues
             for i in range(len(protein)):
                 if np.any(interacting[i]):
                     interface_residues.add(protein.getResnums()[i])
-    
+
     sorted_residues = sorted(list(protein_residues))
     interface_indices = [sorted_residues.index(res) for res in interface_residues]
-    
+
     return sorted(interface_indices)
 
 def run_ligandmpnn_redesign(
@@ -391,10 +391,10 @@ def run_ligandmpnn_redesign(
                         yaml_path = str(matching_yamls[0])  # Take the first matching yaml file
                         with open(yaml_path, 'r') as f:
                             yaml_data = yaml.safe_load(f)
-                    
+
                     # Remove constraints
                     yaml_data.pop('constraints', None)
-                    
+
                     if not non_protein_target:
                         binder_idx = chain_to_number[binder_chain]
                         yaml_data['sequences'][binder_idx]['protein']['sequence'] = sequence.split(':')[chain_to_number[binder_chain]]
@@ -415,5 +415,3 @@ def run_ligandmpnn_redesign(
                     import subprocess
                     subprocess.run([boltz_path, 'predict', str(final_yaml_path), '--out_dir', str(results_final_dir), '--write_full_pae'])
                     print(f"Completed processing {pdb_name} for sequence {idx+1}")
-
-
