@@ -302,7 +302,6 @@ class AtomDiffusion(Module):
         **network_condition_kwargs,
     ):
         if steering_args is not None and "physical_guidance_update" not in steering_args:
-            print(f"Steering args are: {steering_args}")
             steering_args = {
                 'fk_steering': False,
                 'num_particles': 3,
