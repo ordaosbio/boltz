@@ -311,7 +311,6 @@ class AtomDiffusion(Module):
                 'contact_guidance_update': True,
                 'num_gd_steps': 20
             }
-            print(f"Setting steering args to: {steering_args}")
         if steering_args is not None and (
             steering_args["fk_steering"]
             or steering_args["physical_guidance_update"]
