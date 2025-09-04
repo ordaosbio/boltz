@@ -1,0 +1,107 @@
+# Protein Design Pipeline Configuration
+
+# Input Configuration
+target_name: 5zmc
+target_type: protein
+input_type: pdb  # Options: pdb, custom
+pdb_path: ""  # Path to local PDB file (if using custom pdb, else fetch from RCSB)
+pdb_target_ids: ""  # Target PDB IDs (comma-separated, e.g., "C,D")
+target_mols: ""  # Target molecules for small molecules (comma-separated, e.g., "SAM,FAD")
+custom_target_input: ""  # Custom target sequences/ligand(smiles)/dna/rna/metals (comma-separated)
+custom_target_ids: ""  # Custom target IDs (comma-separated, e.g., "A,B")
+binder_id: "B"  # Binder chain ID
+use_msa: false  # Use MSA (if false, runs in single-sequence mode)
+msa_max_seqs: 4096  # Maximum MSA sequences
+suffix: "0"  # Suffix for the output directory
+
+# Modifications
+modifications: ""  # Modifications (comma-separated, e.g., "SEP,SEP")
+modifications_wt: ""  # Wild-type modifications (comma-separated, e.g., "S,S")
+modifications_positions: ""  # Modification positions (comma-separated, matching order)
+modification_target: ""  # Target ID for modifications (e.g., "A")
+
+# Constraints
+constraint_target: ""  # Target ID for constraints (e.g., "A")
+contact_residues: ""  # Contact residues for constraints (comma-separated, e.g., "99,100,109")
+
+# Design Parameters
+length_min: 90
+length_max: 170r
+optimizer_type: SGD
+
+# Iteration Parameters
+pre_iteration: 30
+soft_iteration: 80
+soft_iteration_1: 50
+soft_iteration_2: 50
+temp_iteration: 45
+hard_iteration: 5
+semi_greedy_steps: 2
+recycling_steps: 1
+
+# Advanced Configuration
+use_default_config: true  # Use default configuration (recommended)
+mask_ligand: false  # Mask target for warm-up stage
+optimize_contact_per_binder_pos: true
+distogram_only: true
+design_algorithm: 3stages
+learning_rate: 0.1
+learning_rate_pre: 1.0
+e_soft: 0.8
+e_soft_1: 0.8
+e_soft_2: 1.0
+disconnect_feats: true
+disconnect_pairformer: false
+increasing_contact_over_itr: false
+non_protein_target: false
+pocket_conditioning: true
+set_train: true
+use_temp: true
+noise_scaling: 0.1
+
+# Interaction Parameters
+inter_chain_cutoff: 20.0
+intra_chain_cutoff: 14.0
+num_inter_contacts: 2
+num_intra_contacts: 2
+
+# Loss Function Weights
+con_loss: 1.0  # Contact loss weight
+i_con_loss: 1.0  # Inter-chain contact loss weight
+plddt_loss: 0.1  # pLDDT loss weight
+pae_loss: 0.4  # PAE loss weight
+i_pae_loss: 0.1  # Inter-chain PAE loss weight
+rg_loss: 0.0  # Radius of gyration loss weight
+helix_loss_max: -0.0
+helix_loss_min: -0.3
+
+# LigandMPNN Parameters
+num_designs: 2  # Number of designs per PDB for LigandMPNN
+cutoff: 4  # Cutoff distance for interface residues (Angstroms)
+i_ptm_cutoff: 0.5  # iPTM cutoff for redesign
+complex_plddt_cutoff: 0.7  # Complex pLDDT cutoff for high confidence designs
+
+# System Configuration
+gpu_id: 0  # GPU ID to use
+design_samples: 1  # Number of design samples
+work_dir: null  # Working directory (default: current directory)
+high_iptm: true  # Disable high iPTM designs
+
+# Paths
+boltz_checkpoint: "~/.boltz/boltz1_conf.ckpt"  # Path to Boltz checkpoint
+ccd_path: "~/.boltz/ccd.pkl"  # Path to CCD file
+alphafold_dir: "~/alphafold3"  # AlphaFold directory
+af3_docker_name: "alphafold3"  # Docker name
+af3_database_settings: "~/alphafold3/alphafold3_data_save"  # AlphaFold3 database settings
+af3_hmmer_path: "/home/jupyter-yehlin/.conda/envs/alphafold3_venv"  # AlphaFold3 hmmer path, required for RNA MSA generation
+
+# Control Flags
+run_boltz_design: true  # Run Boltz design step
+run_ligandmpnn: true  # Run LigandMPNN redesign step
+run_alphafold: true  # Run AlphaFold validation step
+run_rosetta: true  # Run Rosetta energy calculation (protein targets only)
+redo_boltz_predict: false  # Redo Boltz prediction
+
+# Visualization
+show_animation: true  # Show animation
+save_trajectory: false  # Save trajectory

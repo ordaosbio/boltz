@@ -744,9 +744,17 @@ def run_pipeline_steps(args, config, boltz_model, yaml_dir, output_dir):
 
     return results
 
-def main():
-    """Main function for running the BoltzDesign pipeline"""
-    args = setup_environment()
+def setup_env(config: dict):
+    from types import SimpleNamespace
+    work_dir = config['work_dir'] or os.getcwd()
+    os.chdir(work_dir)
+    setup_gpu_environment(config['gpu_id'])
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+    return SimpleNamespace(**config)
+
+def run(config: dict):
+    args = setup_env(config)
     boltz_model, config_obj = initialize_pipeline(args)
     yaml_dict, yaml_dir = generate_yaml_config(args, config_obj)
 
@@ -783,10 +791,11 @@ def main():
             print(f"  {key1:<{max_key_len}}: {value1}")
 
     print("  " + "=" * (max_key_len + max_val_len + 5))
-    results = run_pipeline_steps(args, config, boltz_model, yaml_dir, output_dir)
+    run_pipeline_steps(args, config, boltz_model, yaml_dir, output_dir)
 
     print("Pipeline completed successfully!")
 
 
 if __name__ == "__main__":
-    main()
+    config = yaml.safe_load(open('test_boltzdesign.yaml'))
+    run(config)
