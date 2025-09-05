@@ -274,7 +274,7 @@ def load_boltz_model(args, device):
     boltz_model.train()
     return boltz_model, predict_args
 
-def load_design_config(target_type, work_dir):
+def load_design_config(target_type):
     """
     Load design configuration based on target type.
     Modified so that config files are always loaded from the script's directory,
@@ -304,18 +304,6 @@ def load_design_config(target_type, work_dir):
     return config
 
 
-def get_explicit_args():
-    # Get all command-line arguments (excluding the script name)
-    explicit_args = set()
-    for arg in sys.argv[1:]:
-        if arg.startswith('--'):
-            # Handle --arg=value and --arg value
-            if '=' in arg:
-                explicit_args.add(arg.split('=')[0].lstrip('-').replace('-', '_'))
-            else:
-                explicit_args.add(arg.lstrip('-').replace('-', '_'))
-    return explicit_args
-
 def update_config_with_args(config, args):
     """Update configuration with command line arguments"""
     # Always update these basic parameters regardless of use_default_config
@@ -326,14 +314,9 @@ def update_config_with_args(config, args):
     }
 
     # Update basic parameters
-    explicit_args = get_explicit_args()
     config.update(basic_params)
 
     # For advanced parameters, only update those that are explicitly set by the user
-    # (i.e., different from their default values in argparse)
-    parser = argparse.ArgumentParser()
-    _, defaults = parser.parse_known_args([])  # Get default values
-
     advanced_params = {
         'mask_ligand': args.mask_ligand,
         'optimize_contact_per_binder_pos': args.optimize_contact_per_binder_pos,
@@ -363,9 +346,7 @@ def update_config_with_args(config, args):
     }
 
     for param_name, param_value in advanced_params.items():
-        if param_name in explicit_args:
-            print(f"Updating {param_name} to {param_value}")
-            config[param_name] = param_value
+        config[param_name] = param_value
     return config
 
 def run_boltz_design_step(args, config, boltz_model, yaml_dir, main_dir, version_name):
@@ -697,8 +678,7 @@ def generate_yaml_config(args, config_obj):
 
 def setup_pipeline_config(args):
     """Setup pipeline configuration"""
-    work_dir = args.work_dir or os.getcwd()
-    config = load_design_config(args.target_type, work_dir)
+    config = load_design_config(args.target_type)
     return update_config_with_args(config, args)
 
 def setup_output_directories(args):

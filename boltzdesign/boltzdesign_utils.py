@@ -685,7 +685,7 @@ def boltz_hallucination(
             else:
                 # Get model output without trajectory
                 if pre_run or distogram_only:
-                    dict_out, _, _, _, _ = boltz_model.get_distogram(batch)
+                    dict_out, _, _, _, _ = boltz_model.get_distogram(batch, predict_args["recycling_steps"])
                 else:
                     dict_out = boltz_model.get_distogram_confidence(batch, **confidence_args)
 
@@ -1019,15 +1019,15 @@ def boltz_hallucination(
 
         if best_iptm > prev_iptm:
             best_seq = mutated_sequence_ls[best_id]
-            for seq_data in [data, data_apo]:
-                seq_data['sequences'][chain_to_number[binder_chain]]['protein']['sequence'] = best_seq
+            data['sequences'][chain_to_number[binder_chain]]['protein']['sequence'] = best_seq
+            data_apo['sequences'][0]['protein']['sequence'] = best_seq
             print(f"Step {step}, Epoch {best_id}, Update sequence, iptm {best_iptm}, previous iptm {prev_iptm}")
             print(f"Update sequence {best_seq}")
             prev_iptm = best_iptm
             prev_sequence = best_seq
         else:
-            for seq_data in [data, data_apo]:
-                seq_data['sequences'][chain_to_number[binder_chain]]['protein']['sequence'] = prev_sequence
+            data['sequences'][chain_to_number[binder_chain]]['protein']['sequence'] = prev_sequence
+            data_apo['sequences'][0]['protein']['sequence'] = prev_sequence
 
         best_batch, best_batch_apo, best_structure, best_structure_apo = _update_batches(data, data_apo)
 
