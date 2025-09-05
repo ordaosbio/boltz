@@ -1,17 +1,17 @@
-# Protein Design Pipeline Configuration
+# Protein Design Pipeline Configuration - Peptide Target
 
 # Input Configuration
-target_name: 5zmc
-target_type: protein
+target_name: ""
+target_type: ""
 input_type: pdb  # Options: pdb, custom
 pdb_path: ""  # Path to local PDB file (if using custom pdb, else fetch from RCSB)
-pdb_target_ids: "A"  # Target PDB IDs (comma-separated, e.g., "C,D")
+pdb_target_ids: ""  # Target PDB IDs (comma-separated, e.g., "C,D")
 target_mols: ""  # Target molecules for small molecules (comma-separated, e.g., "SAM,FAD")
 custom_target_input: ""  # Custom target sequences/ligand(smiles)/dna/rna/metals (comma-separated)
 custom_target_ids: ""  # Custom target IDs (comma-separated, e.g., "A,B")
-binder_id: "B"  # Binder chain ID
+binder_id: "A"  # Binder chain ID
 use_msa: false  # Use MSA (if false, runs in single-sequence mode)
-msa_max_seqs: 4096  # Maximum MSA sequences
+msa_max_seqs: 4096
 suffix: "0"  # Suffix for the output directory
 
 # Modifications
@@ -37,12 +37,12 @@ soft_iteration_2: 50
 temp_iteration: 45
 hard_iteration: 5
 semi_greedy_steps: 2
-recycling_steps: 1
+recycling_steps: 0
 
 # Advanced Configuration
 use_default_config: true  # Use default configuration (recommended)
-mask_ligand: false  # Mask target for warm-up stage
-optimize_contact_per_binder_pos: true
+mask_ligand: false
+optimize_contact_per_binder_pos: false
 distogram_only: true
 design_algorithm: 3stages
 learning_rate: 0.1

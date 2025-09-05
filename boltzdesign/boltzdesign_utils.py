@@ -685,7 +685,7 @@ def boltz_hallucination(
             else:
                 # Get model output without trajectory
                 if pre_run or distogram_only:
-                    dict_out, s, z, s_inputs = boltz_model.get_distogram(batch)
+                    dict_out, _, _, _, _ = boltz_model.get_distogram(batch)
                 else:
                     dict_out = boltz_model.get_distogram_confidence(batch, **confidence_args)
 

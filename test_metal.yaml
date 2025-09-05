@@ -1,17 +1,17 @@
-# Protein Design Pipeline Configuration
+# Protein Design Pipeline Configuration - Metal Target
 
 # Input Configuration
-target_name: 5zmc
-target_type: protein
+target_name: ""
+target_type: ""
 input_type: pdb  # Options: pdb, custom
 pdb_path: ""  # Path to local PDB file (if using custom pdb, else fetch from RCSB)
-pdb_target_ids: "A"  # Target PDB IDs (comma-separated, e.g., "C,D")
+pdb_target_ids: ""  # Target PDB IDs (comma-separated, e.g., "C,D")
 target_mols: ""  # Target molecules for small molecules (comma-separated, e.g., "SAM,FAD")
 custom_target_input: ""  # Custom target sequences/ligand(smiles)/dna/rna/metals (comma-separated)
 custom_target_ids: ""  # Custom target IDs (comma-separated, e.g., "A,B")
-binder_id: "B"  # Binder chain ID
+binder_id: "A"  # Binder chain ID
 use_msa: false  # Use MSA (if false, runs in single-sequence mode)
-msa_max_seqs: 4096  # Maximum MSA sequences
+msa_max_seqs: 4096
 suffix: "0"  # Suffix for the output directory
 
 # Modifications
@@ -25,35 +25,35 @@ constraint_target: ""  # Target ID for constraints (e.g., "A")
 contact_residues: ""  # Contact residues for constraints (comma-separated, e.g., "99,100,109")
 
 # Design Parameters
-length_min: 90
-length_max: 170
+length_min: 130
+length_max: 180
 optimizer_type: SGD
 
 # Iteration Parameters
 pre_iteration: 30
-soft_iteration: 80
+soft_iteration: 75
 soft_iteration_1: 50
 soft_iteration_2: 50
 temp_iteration: 45
 hard_iteration: 5
 semi_greedy_steps: 2
-recycling_steps: 1
+recycling_steps: 0
 
 # Advanced Configuration
 use_default_config: true  # Use default configuration (recommended)
-mask_ligand: false  # Mask target for warm-up stage
-optimize_contact_per_binder_pos: true
+mask_ligand: true
+optimize_contact_per_binder_pos: false
 distogram_only: true
 design_algorithm: 3stages
 learning_rate: 0.1
-learning_rate_pre: 1.0
+learning_rate_pre: 0.2
 e_soft: 0.8
 e_soft_1: 0.8
 e_soft_2: 1.0
 disconnect_feats: true
 disconnect_pairformer: false
 increasing_contact_over_itr: false
-non_protein_target: false
+non_protein_target: true
 pocket_conditioning: true
 set_train: true
 use_temp: true
@@ -62,7 +62,7 @@ noise_scaling: 0.1
 # Interaction Parameters
 inter_chain_cutoff: 20.0
 intra_chain_cutoff: 14.0
-num_inter_contacts: 2
+num_inter_contacts: 4
 num_intra_contacts: 2
 
 # Loss Function Weights

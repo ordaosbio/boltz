@@ -269,18 +269,7 @@ class Boltz1(LightningModule):
         ):
             self.use_kernels = False
 
-    def forward(
-        self,
-        feats: dict[str, Tensor],
-        recycling_steps: int = 0,
-        num_sampling_steps: Optional[int] = None,
-        multiplicity_diffusion_train: int = 1,
-        diffusion_samples: int = 1,
-        max_parallel_samples: Optional[int] = None,
-        run_confidence_sequentially: bool = False,
-    ) -> dict[str, Tensor]:
-        dict_out = {}
-
+    def get_distogram(self, feats: dict[str, Tensor], recycling_steps: int = 0):
         # Compute input embeddings
         with torch.set_grad_enabled(
             self.training and self.structure_prediction_training
@@ -340,11 +329,98 @@ class Boltz1(LightningModule):
                     )
 
             pdistogram = self.distogram_module(z)
-            dict_out = {
-                "pdistogram": pdistogram,
-                "s": s,
-                "z": z,
-            }
+            return {"pdistogram": pdistogram}, s, z, s_inputs, relative_position_encoding
+
+    def get_distogram_confidence(
+        self,
+        feats: dict[str, Tensor],
+        recycling_steps: int = 0,
+        num_sampling_steps: Optional[int] = None,
+        multiplicity_diffusion_train: int = 1,
+        diffusion_samples: int = 1,
+        run_confidence_sequentially: bool = False,
+        disconnect_feats: bool = False,
+        disconnect_pairformer: bool = False,
+    ) -> dict[str, Tensor]:
+
+        dict_out, s, z, s_inputs, relative_position_encoding = self.get_distogram(feats, recycling_steps)
+
+        structure_out = self.structure_module.sample(
+            s_trunk=s,
+            z_trunk=z,
+            s_inputs=s_inputs,
+            feats=feats,
+            relative_position_encoding=relative_position_encoding,
+            num_sampling_steps=num_sampling_steps,
+            atom_mask=feats["atom_pad_mask"],
+            multiplicity=diffusion_samples,
+            train_accumulate_token_repr=self.training,
+        )
+        # Detach structure outputs but not the inputs
+        dict_out.update({
+            k: v.detach() if isinstance(v, torch.Tensor) else v
+            for k, v in structure_out.items()
+        })
+
+        if disconnect_feats:
+            feats_ = {k: v.detach() if isinstance(v, torch.Tensor) else v for k, v in feats.items()}
+        else:
+            feats_ = feats
+
+        if disconnect_pairformer:
+            s_inputs = s_inputs.detach()
+            s = s.detach()
+            z = z.detach()
+            dict_out_pdistogram = dict_out["pdistogram"].detach()
+
+        else:
+            s_inputs = s_inputs
+            s = s
+            z = z
+            dict_out_pdistogram = dict_out["pdistogram"]
+
+        if self.confidence_prediction:
+            dict_out.update(
+                self.confidence_module(
+                    s_inputs=s_inputs,  # Allow gradients
+                    s=s,  # Allow gradients
+                    z=z,  # Allow gradients
+                    s_diffusion=(
+                        dict_out["diff_token_repr"]
+                        if self.confidence_module.use_s_diffusion
+                        else None
+                    ),
+                    x_pred=dict_out["sample_atom_coords"],  # Already detached above
+                    feats=feats_,
+                    pred_distogram_logits=dict_out_pdistogram,
+                    multiplicity=diffusion_samples,
+                    run_sequentially=run_confidence_sequentially,
+                    use_kernels=self.use_kernels,
+                )
+            )
+
+        if self.confidence_prediction and self.confidence_module.use_s_diffusion:
+            dict_out.pop("diff_token_repr", None)
+
+        return dict_out
+
+    def forward(
+        self,
+        feats: dict[str, Tensor],
+        recycling_steps: int = 0,
+        num_sampling_steps: Optional[int] = None,
+        multiplicity_diffusion_train: int = 1,
+        diffusion_samples: int = 1,
+        max_parallel_samples: Optional[int] = None,
+        run_confidence_sequentially: bool = False,
+    ) -> dict[str, Tensor]:
+        dict_out, s, z, s_inputs, relative_position_encoding = self.get_distogram(feats, recycling_steps)
+
+        dict_out = {
+            "pdistogram": dict_out["pdistogram"],
+            "s": s,
+            "z": z,
+        }
 
         # Compute structure module
         if self.training and self.structure_prediction_training:
