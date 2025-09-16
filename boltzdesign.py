@@ -4,10 +4,7 @@ import argparse
 import yaml
 import json
 import shutil
-import pickle
-import glob
 import numpy as np
-import random
 import logging
 import subprocess
 import pandas as pd
@@ -15,6 +12,7 @@ from pathlib import Path
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 warnings.simplefilter(action='ignore', category=DeprecationWarning)
+print(os.getcwd())
 sys.path.append(f'{os.getcwd()}/boltzdesign')
 
 from boltzdesign_utils import *
@@ -411,7 +409,7 @@ def run_ligandmpnn_step(args, main_dir, version_name, ligandmpnn_dir, yaml_dir, 
 
     os.makedirs(ligandmpnn_dir, exist_ok=True)
     # Convert CIF to PDB and run LigandMPNN
-    convert_cif_files_to_pdb(boltzdesign_dir, pdb_save_dir, high_iptm=args.high_iptm, i_ptm_cutoff=args.i_ptm_cutoff)
+    convert_cif_files_to_pdb(boltzdesign_dir, pdb_save_dir, high_iptm=False, i_ptm_cutoff=args.i_ptm_cutoff)
 
     if not any(f.endswith('.pdb') for f in os.listdir(pdb_save_dir)):
         print("No successful designs from BoltzDesign")
@@ -703,9 +701,9 @@ def run_pipeline_steps(args, config, boltz_model, yaml_dir, output_dir):
     """Run the pipeline steps based on arguments"""
     results = {'ligandmpnn_dir': f"{output_dir['main_dir']}/{output_dir['version']}/ligandmpnn_cutoff_{args.cutoff}", 'af_output_dir': None, 'af_output_apo_dir': None, 'af_pdb_dir': None, 'af_pdb_dir_apo': None}
 
-    if args.run_boltz_design:
-        run_boltz_design_step(args, config, boltz_model, yaml_dir,
-                            output_dir['main_dir'], output_dir['version'])
+    # if args.run_boltz_design:
+    #     run_boltz_design_step(args, config, boltz_model, yaml_dir,
+    #                         output_dir['main_dir'], output_dir['version'])
 
     if args.run_ligandmpnn:
         run_ligandmpnn_step(
