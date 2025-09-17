@@ -527,7 +527,8 @@ class InferenceOptions:
     contact_constraints: Optional[
         list[tuple[tuple[int, int], tuple[int, int], float, bool]]
     ] = None
-
+    binders: Optional[list[int]] = None
+    pocket: Optional[list[tuple[int, int]]] = None
 
 @dataclass(frozen=True)
 class MDInfo:

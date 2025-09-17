@@ -1493,6 +1493,8 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
     connections = []
     pocket_constraints = []
     contact_constraints = []
+    pocket_binders = []
+    pocket_residues = []
     constraints = schema.get("constraints", [])
     for constraint in constraints:
         if "bond" in constraint:
@@ -1516,6 +1518,11 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
             if len(pocket_constraints) > 0 and not boltz_2:
                 msg = f"Only one pocket binders is supported in Boltz-1!"
                 raise ValueError(msg)
+            else:
+                pocket_binders.append(chain_to_idx[constraint["pocket"]["binder"]])
+                pocket_residues.extend(
+                    [(chain_to_idx[chain_name],residue_index-1) for chain_name,residue_index in constraint["pocket"]["contacts"]]
+                )
 
             max_distance = constraint["pocket"].get("max_distance", 6.0)
             if max_distance != 6.0 and not boltz_2:
@@ -1615,7 +1622,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
             template_chain_ids is not None
             and chain_ids is not None
         ):
-           
+
                 if len(template_chain_ids) == len(chain_ids):
                      if len(template_chain_ids) > 0 and len(chain_ids) > 0:
                         matched = True
@@ -1785,7 +1792,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
         chain_infos.append(chain_info)
 
     options = InferenceOptions(
-        pocket_constraints=pocket_constraints, contact_constraints=contact_constraints
+        pocket_constraints=pocket_constraints, contact_constraints=contact_constraints, binders=pocket_binders, pocket=pocket_residues
     )
     record = Record(
         id=name,
