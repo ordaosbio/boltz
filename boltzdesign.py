@@ -701,20 +701,20 @@ def run_pipeline_steps(args, config, boltz_model, yaml_dir, output_dir):
     """Run the pipeline steps based on arguments"""
     results = {'ligandmpnn_dir': f"{output_dir['main_dir']}/{output_dir['version']}/ligandmpnn_cutoff_{args.cutoff}", 'af_output_dir': None, 'af_output_apo_dir': None, 'af_pdb_dir': None, 'af_pdb_dir_apo': None}
 
-    # if args.run_boltz_design:
-    #     run_boltz_design_step(args, config, boltz_model, yaml_dir,
-    #                         output_dir['main_dir'], output_dir['version'])
+    if args.run_boltz_design:
+        run_boltz_design_step(args, config, boltz_model, yaml_dir,
+                            output_dir['main_dir'], output_dir['version'])
 
     if args.run_ligandmpnn:
         run_ligandmpnn_step(
             args, output_dir['main_dir'], output_dir['version'],
             results['ligandmpnn_dir'], yaml_dir, args.work_dir or os.getcwd()
         )
-    if args.run_alphafold:
-        mod_to_wt_aa = modification_to_wt_aa(args.modifications, args.modifications_wt)
-        results['af_output_dir'], results['af_output_apo_dir'], results['af_pdb_dir'], results['af_pdb_dir_apo'] = run_alphafold_step(
-            args, results['ligandmpnn_dir'], args.work_dir or os.getcwd(), mod_to_wt_aa
-        )
+    #if args.run_alphafold:
+    #    mod_to_wt_aa = modification_to_wt_aa(args.modifications, args.modifications_wt)
+    #    results['af_output_dir'], results['af_output_apo_dir'], results['af_pdb_dir'], results['af_pdb_dir_apo'] = run_alphafold_step(
+    #        args, results['ligandmpnn_dir'], args.work_dir or os.getcwd(), mod_to_wt_aa
+    #    )
 
     if args.run_rosetta:
         run_rosetta_step(args, results['ligandmpnn_dir'],
