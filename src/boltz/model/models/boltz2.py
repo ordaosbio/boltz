@@ -398,6 +398,154 @@ class Boltz2(LightningModule):
                 x["label"] for x in self.val_group_mapper.values()
             }, msg
 
+    def get_distogram(self, feats: dict[str, Tensor], recycling_steps: int = 0):
+        # Compute input embeddings
+        with torch.set_grad_enabled(
+            self.training and self.structure_prediction_training
+        ):
+            s_inputs = self.input_embedder(feats)
+
+            # Initialize the sequence and pairwise embeddings
+            s_init = self.s_init(s_inputs)
+            z_init = (
+                self.z_init_1(s_inputs)[:, :, None]
+                + self.z_init_2(s_inputs)[:, None, :]
+            )
+            relative_position_encoding = self.rel_pos(feats)
+            z_init = z_init + relative_position_encoding
+            z_init = z_init + self.token_bonds(feats["token_bonds"].float())
+            if self.bond_type_feature:
+                z_init = z_init + self.token_bonds_type(feats["type_bonds"].long())
+            z_init = z_init + self.contact_conditioning(feats)
+
+
+            # Perform rounds of the pairwise stack
+            s = torch.zeros_like(s_init)
+            z = torch.zeros_like(z_init)
+
+            # Compute pairwise mask
+            mask = feats["token_pad_mask"].float()
+            pair_mask = mask[:, :, None] * mask[:, None, :]
+
+            for i in range(recycling_steps + 1):
+                with torch.set_grad_enabled(self.training and (i == recycling_steps)):
+                    # Fixes an issue with unused parameters in autocast
+                    if (
+                        self.training
+                        and (i == recycling_steps)
+                        and torch.is_autocast_enabled()
+                    ):
+                        torch.clear_autocast_cache()
+
+                    # Apply recycling
+                    s = s_init + self.s_recycle(self.s_norm(s))
+                    z = z_init + self.z_recycle(self.z_norm(z))
+
+                    # Revert to uncompiled version for validation
+                    if self.is_pairformer_compiled and not self.training:
+                        pairformer_module = self.pairformer_module._orig_mod  # noqa: SLF001
+                    else:
+                        pairformer_module = self.pairformer_module
+
+                    s, z = pairformer_module(
+                        s,
+                        z,
+                        mask=mask,
+                        pair_mask=pair_mask,
+                        use_kernels=self.use_kernels,
+                    )
+
+            pdistogram = self.distogram_module.distogram(z+z.transpose(1, 2))
+            return {"pdistogram": pdistogram}, s, z, s_inputs, relative_position_encoding
+
+    def get_distogram_confidence(
+        self,
+        feats: dict[str, Tensor],
+        recycling_steps: int = 0,
+        num_sampling_steps: Optional[int] = None,
+        multiplicity_diffusion_train: int = 1,
+        diffusion_samples: int = 1,
+        run_confidence_sequentially: bool = False,
+        disconnect_feats: bool = False,
+        disconnect_pairformer: bool = False,
+    ) -> dict[str, Tensor]:
+
+        dict_out, s, z, s_inputs, relative_position_encoding = self.get_distogram(feats, recycling_steps)
+
+        q, c, to_keys, atom_enc_bias, atom_dec_bias, token_trans_bias = (
+        self.diffusion_conditioning(
+            s_trunk=s,
+            z_trunk=z,
+            relative_position_encoding=relative_position_encoding,
+            feats=feats,
+        )
+        )
+        diffusion_conditioning = {
+            "q": q,
+            "c": c,
+            "to_keys": to_keys,
+            "atom_enc_bias": atom_enc_bias,
+            "atom_dec_bias": atom_dec_bias,
+            "token_trans_bias": token_trans_bias,
+        }
+
+        with torch.autocast("cuda", enabled=False):
+            struct_out = self.structure_module.sample(
+                s_trunk=s.float(),
+                s_inputs=s_inputs.float(),
+                feats=feats,
+                num_sampling_steps=num_sampling_steps,
+                atom_mask=feats["atom_pad_mask"].float(),
+                multiplicity=diffusion_samples,
+                max_parallel_samples=None,
+                steering_args=self.steering_args,
+                diffusion_conditioning=diffusion_conditioning,
+            )
+            dict_out.update(struct_out)
+        # Detach structure outputs but not the inputs
+        dict_out.update({
+            k: v.detach() if isinstance(v, torch.Tensor) else v
+            for k, v in structure_out.items()
+        })
+
+        if disconnect_feats:
+            feats_ = {k: v.detach() if isinstance(v, torch.Tensor) else v for k, v in feats.items()}
+        else:
+            feats_ = feats
+
+        if disconnect_pairformer:
+            s_inputs = s_inputs.detach()
+            s = s.detach()
+            z = z.detach()
+            dict_out_pdistogram = dict_out["pdistogram"].detach()
+
+        else:
+            s_inputs = s_inputs
+            s = s
+            z = z
+            dict_out_pdistogram = dict_out["pdistogram"]
+
+        if self.confidence_prediction:
+            dict_out.update(
+                self.confidence_module(
+                    s_inputs=s_inputs,  # Allow gradients
+                    s=s,  # Allow gradients
+                    z=z,  # Allow gradients
+                    x_pred=dict_out["sample_atom_coords"],  # Already detached above
+                    feats=feats_,
+                    pred_distogram_logits=dict_out_pdistogram,
+                    multiplicity=diffusion_samples,
+                    run_sequentially=run_confidence_sequentially,
+                    use_kernels=self.use_kernels,
+                )
+            )
+
+        if self.confidence_prediction and self.confidence_module.use_s_diffusion:
+            dict_out.pop("diff_token_repr", None)
+
+        return dict_out
+
+
     def forward(
         self,
         feats: dict[str, Tensor],

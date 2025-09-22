@@ -613,7 +613,8 @@ class MSAModule(nn.Module):
 
         # Load relevant features
         msa = feats["msa"]
-        msa = torch.nn.functional.one_hot(msa, num_classes=const.num_tokens)
+        if len(msa.shape) == 3:
+            msa = torch.nn.functional.one_hot(msa, num_classes=const.num_tokens)
         has_deletion = feats["has_deletion"].unsqueeze(-1)
         deletion_value = feats["deletion_value"].unsqueeze(-1)
         is_paired = feats["msa_paired"].unsqueeze(-1)

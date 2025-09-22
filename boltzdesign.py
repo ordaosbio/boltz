@@ -207,6 +207,9 @@ Examples:
     parser.add_argument('--ccd_path', type=str,
         default='~/.boltz/ccd.pkl',
         help='Path to CCD file')
+    parser.add_argument('--mol_dir', type=str,
+        default='~/.cache/.boltz/mols',
+        help='Path to molecule directory')
     parser.add_argument('--alphafold_dir', type=str,
         default='~/alphafold3',
         help='AlphaFold directory')
@@ -263,12 +266,17 @@ def load_boltz_model(args, device):
         "recycling_steps": args.recycling_steps,
         "sampling_steps": 200,
         "diffusion_samples": 1,
+        "max_parallel_samples": None,
         "write_confidence_summary": True,
         "write_full_pae": False,
         "write_full_pde": False,
     }
 
-    boltz_model = get_boltz_model(args.boltz_checkpoint, predict_args, device)
+    if 'boltz2' in args.boltz_checkpoint:
+    # boltz_model = get_boltz_model(args.boltz_checkpoint, predict_args, device)
+        boltz_model = get_boltz2_model(args.boltz_checkpoint, predict_args, device)
+    else:
+        boltz_model = get_boltz_model(args.boltz_checkpoint, predict_args, device)
     boltz_model.train()
     return boltz_model, predict_args
 
@@ -370,6 +378,7 @@ def run_boltz_design_step(args, config, boltz_model, yaml_dir, main_dir, version
         yaml_dir=os.path.dirname(yaml_dir),
         boltz_model=boltz_model,
         ccd_path=args.ccd_path,
+        mol_dir=args.mol_dir,
         design_samples=args.design_samples,
         version_name=version_name,
         config=config,

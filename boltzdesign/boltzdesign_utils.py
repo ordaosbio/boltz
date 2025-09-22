@@ -12,9 +12,12 @@ import random
 from boltz.data import const
 from boltz.data.types import MSA, Connection, Input, Structure, Interface
 from boltz.model.models.boltz1 import Boltz1
-from boltz.main import BoltzDiffusionParams
+from boltz.model.models.boltz2 import Boltz2
+from boltz.main import BoltzDiffusionParams, Boltz2DiffusionParams, BoltzSteeringParams, PairformerArgsV2
 from boltz.data.tokenize.boltz import BoltzTokenizer
+from boltz.data.tokenize.boltz2 import Boltz2Tokenizer
 from boltz.data.feature.featurizer import BoltzFeaturizer
+from boltz.data.feature.featurizerv2 import Boltz2Featurizer
 from boltz.data.parse.schema import parse_boltz_schema
 from boltz.data.write.mmcif import to_mmcif
 from boltz.data.write.pdb import to_pdb
@@ -33,7 +36,7 @@ import logging
 
 logging.basicConfig(level=logging.WARNING)
 
-def save_confidence_scores(folder_dir, output, structure,name, model_idx=0):
+def save_confidence_scores(folder_dir, output, structure,name, model_idx=0, boltz2=False):
     output_dir = os.path.join(folder_dir, f"boltz_results_{name}", "predictions", name)
 
     os.makedirs(output_dir, exist_ok=True)
@@ -52,7 +55,7 @@ def save_confidence_scores(folder_dir, output, structure,name, model_idx=0):
     plddts= output['plddt'].detach().cpu().numpy()[0]
     path = Path(output_dir) / f"{name}_model_{model_idx}.cif"
     with path.open("w") as f:
-        f.write(to_mmcif(new_structure, plddts=plddts))
+        f.write(to_mmcif(new_structure, plddts=plddts, boltz2=boltz2))
 
     # Save confidence summary
     if "plddt" in output:
@@ -438,6 +441,27 @@ def get_boltz_model(checkpoint: Optional[str] = None, predict_args=None, device:
     )
     return model_module
 
+def get_boltz2_model(checkpoint: Optional[str] = None, predict_args=None, device: Optional[str] = None) -> Boltz2:
+    torch.set_grad_enabled(True)
+    torch.set_float32_matmul_precision("highest")
+    diff_process = asdict(Boltz2DiffusionParams())
+    diff_process["step_scale"] = 1.5  # Default value
+    steering_args = asdict(BoltzSteeringParams())
+    steering_args["contact_guidance_update"] = False
+    model_module: Boltz2 = Boltz2.load_from_checkpoint(
+        checkpoint,
+        strict=False,
+        predict_args=predict_args,
+        map_location=device,
+        diffusion_process_args=diff_process,
+        pairformer_args=asdict(PairformerArgsV2()),
+        steering_args=steering_args,
+        ema=False,
+        structure_prediction_training=True,
+        no_msa=False,
+        no_atom_encoder=False,
+    )
+    return model_module
 
 
 def boltz_hallucination(
@@ -445,6 +469,7 @@ def boltz_hallucination(
     boltz_model,
     yaml_path,
     ccd_lib,
+    mol_dir,
     length=100,
     binder_chain='A',
     design_algorithm="3stages",
@@ -490,6 +515,7 @@ def boltz_hallucination(
         "recycling_steps": recycling_steps,  # Default value
         "sampling_steps": 200,  # Default value
         "diffusion_samples": 1,  # Default value
+        "max_parallel_samples": None,  # Default value
         "write_confidence_summary": True,
         "write_full_pae": False,
         "write_full_pde": False,
@@ -502,7 +528,7 @@ def boltz_hallucination(
 
     data['sequences'][chain_to_number[binder_chain]]['protein']['sequence'] = 'X'*length
     name = yaml_path.stem
-    target = parse_boltz_schema(name, data, ccd_lib)
+    target = parse_boltz_schema(name, data, ccd_lib, boltz_2=isinstance(boltz_model, Boltz2))
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     boltz_model.train() if set_train else boltz_model.eval()
     print(f"set in {'train' if set_train else 'eval'} mode")
@@ -511,15 +537,16 @@ def boltz_hallucination(
         target_id = target.record.id
         structure = target.structure
 
-        structure = Structure(
-                atoms=structure.atoms,
-                bonds=structure.bonds,
-                residues=structure.residues,
-                chains=structure.chains,
-                connections=structure.connections.astype(Connection),
-                interfaces=structure.interfaces,
-                mask=structure.mask,
-            )
+        if isinstance(boltz_model, Boltz1):
+            structure = Structure(
+                    atoms=structure.atoms,
+                    bonds=structure.bonds,
+                    residues=structure.residues,
+                    chains=structure.chains,
+                    connections=structure.connections.astype(Connection),
+                    interfaces=structure.interfaces,
+                    mask=structure.mask,
+                )
 
         msas = {}
         for chain in target.record.chains:
@@ -528,40 +555,86 @@ def boltz_hallucination(
                 msa = np.load(msa_id)
                 msas[chain.chain_id] = MSA(**msa)
 
-        input = Input(structure, msas)
+        input = Input(structure, msas, record=target.record)
 
-        tokenizer = BoltzTokenizer()
-        tokenized = tokenizer.tokenize(input)
-        featurizer = BoltzFeaturizer()
+        if isinstance(boltz_model, Boltz2):
+            tokenizer = Boltz2Tokenizer()
+            featurizer = Boltz2Featurizer()
 
-        if pocket_conditioning:
-            options = target.record.inference_options
-            binders, pocket = options.binders, options.pocket
-            batch = featurizer.process(
-                        tokenized,
-                        training=False,
-                        max_atoms=None,
-                        max_tokens=None,
-                        max_seqs=max_seqs,
-                        pad_to_max_seqs=False,
-                        symmetries={},
-                        compute_symmetries=False,
-                        inference_binder=binders,
-                        inference_pocket=pocket,
-                    )
+            tokenized = tokenizer.tokenize(input)
+            from boltz.data.mol import load_canonicals, load_molecules
+            molecules = {}
+            molecules.update(load_canonicals(mol_dir))
+            molecules.update(tokenized.extra_mols if tokenized.extra_mols else {})
+            mol_names = set(tokenized.tokens["res_name"].tolist())
+            mol_names = mol_names - set(molecules.keys())
+            molecules.update(load_molecules(mol_dir, mol_names))
+
+            if pocket_conditioning:
+                options = target.record.inference_options
+                batch = featurizer.process(
+                            tokenized,
+                            np.random.default_rng(42),
+                            molecules=molecules,
+                            training=False,
+                            max_atoms=None,
+                            max_tokens=None,
+                            max_seqs=max_seqs,
+                            pad_to_max_seqs=False,
+                            compute_symmetries=False,
+                            compute_frames=True,
+                            inference_pocket_constraints=options.pocket_constraints,
+                            inference_contact_constraints=options.contact_constraints,
+                        )
+            else:
+                batch = featurizer.process(
+                            tokenized,
+                            np.random.default_rng(42),
+                            molecules,
+                            training=False,
+                            max_atoms=None,
+                            max_tokens=None,
+                            max_seqs=max_seqs,
+                            pad_to_max_seqs=False,
+                            compute_symmetries=False,
+                            compute_frames=True,
+                        )
+
+
         else:
-            batch = featurizer.process(
-                        tokenized,
-                        training=False,
-                        max_atoms=None,
-                        max_tokens=None,
-                        max_seqs=max_seqs,
-                        pad_to_max_seqs=False,
-                        symmetries={},
-                        compute_symmetries=False,
-                        inference_binder=None,
-                        inference_pocket=None,
-                    )
+            tokenizer = BoltzTokenizer()
+            featurizer = BoltzFeaturizer()
+
+            tokenized = tokenizer.tokenize(input)
+
+            if pocket_conditioning:
+                options = target.record.inference_options
+                binders, pocket = options.binders, options.pocket
+                batch = featurizer.process(
+                            tokenized,
+                            training=False,
+                            max_atoms=None,
+                            max_tokens=None,
+                            max_seqs=max_seqs,
+                            pad_to_max_seqs=False,
+                            symmetries={},
+                            compute_symmetries=False,
+                            inference_binder=binders,
+                            inference_pocket=pocket,
+                        )
+            else:
+                batch = featurizer.process(
+                            tokenized,
+                            training=False,
+                            max_atoms=None,
+                            max_tokens=None,
+                            max_seqs=max_seqs,
+                            pad_to_max_seqs=False,
+                            symmetries={},
+                            compute_symmetries=False,
+                            inference_binder=None,
+                            inference_pocket=None,
+                        )
 
         if keep_record:
             batch['record'] = target.record
@@ -794,6 +867,8 @@ def boltz_hallucination(
                 batch['msa'] = batch['res_type'].unsqueeze(0).to(device).detach()
                 batch['profile'] = batch['msa'].float().mean(dim=0).to(device).detach()
             else:
+                if len(batch['msa'].shape) == 3:
+                    batch['msa'] = torch.nn.functional.one_hot(batch['msa'], num_classes=const.num_tokens)
                 batch['msa'][:,0,:,:] = batch['res_type'].to(device).detach()
                 batch['profile'][batch['entity_id']==chain_to_number[binder_chain],:] = batch['msa'][:, 0, (batch['entity_id']==chain_to_number[binder_chain])[0],:].float().mean(dim=1).to(device).detach()
 
@@ -935,6 +1010,7 @@ def boltz_hallucination(
         "recycling_steps": 3,  # Default value
         "sampling_steps": 200,  # Default value
         "diffusion_samples": 1,  # Default value
+        "max_parallel_samples": None,  # Default value
         "write_confidence_summary": True,
         "write_full_pae": True,
         "write_full_pde": False,
@@ -957,6 +1033,7 @@ def boltz_hallucination(
     "recycling_steps": 3,  # Default value
     "sampling_steps": 200,  # Default value
     "diffusion_samples": 1,  # Default value
+    "max_parallel_samples": None,  # Default value
     "write_confidence_summary": True,
     "write_full_pae": True,
     "write_full_pde": False,
@@ -981,8 +1058,8 @@ def boltz_hallucination(
     data_apo['sequences'] = [data_apo['sequences'][chain_to_number[binder_chain]]]  # Keep only chain B
 
     def _update_batches(data, data_apo):
-        target = parse_boltz_schema(name, data, ccd_lib)
-        target_apo = parse_boltz_schema(name, data_apo, ccd_lib)
+        target = parse_boltz_schema(name, data, ccd_lib, boltz_2=isinstance(boltz_model, Boltz2))
+        target_apo = parse_boltz_schema(name, data_apo, ccd_lib, boltz_2=isinstance(boltz_model, Boltz2))
         best_batch, best_structure = get_batch(target, msa_max_seqs, length, keep_record=True)
         best_batch_apo, best_structure_apo = get_batch(target_apo, msa_max_seqs, length, keep_record=True)
         best_batch = {key: value.unsqueeze(0).to(device) if key != 'record' else value for key, value in best_batch.items()}
@@ -1044,6 +1121,7 @@ def run_boltz_design(
     yaml_dir,
     boltz_model,
     ccd_path,
+    mol_dir,
     design_samples =1,
     version_name=None,
     config=None,
@@ -1141,6 +1219,7 @@ def run_boltz_design(
                         boltz_model,
                         yaml_path,
                         ccd_lib,
+                        mol_dir,
                         **filtered_config,
                         pre_run=True,
                         input_res_type=False,
@@ -1153,6 +1232,7 @@ def run_boltz_design(
                         boltz_model,
                         yaml_path,
                         ccd_lib,
+                        mol_dir,
                         **filtered_config,
                         pre_run=False,
                         input_res_type=input_res_type,
@@ -1288,7 +1368,7 @@ def run_boltz_design(
                         subprocess.run([boltz_path, 'predict', str(result_yaml), '--out_dir', str(results_final_dir), '--write_full_pae'])
                         subprocess.run([boltz_path, 'predict', str(result_yaml_apo), '--out_dir', str(results_final_dir_apo), '--write_full_pae'])
                     else:
-                        save_confidence_scores(results_final_dir, output, best_structure, f"{target_binder_input}_results_itr{itr + 1}_length{config['length']}", 0)
-                        save_confidence_scores(results_final_dir_apo, output_apo, best_structure_apo, f"{target_binder_input}_results_itr{itr + 1}_length{config['length']}", 0)
+                        save_confidence_scores(results_final_dir, output, best_structure, f"{target_binder_input}_results_itr{itr + 1}_length{config['length']}", 0, boltz2=isinstance(boltz_model, Boltz2))
+                        save_confidence_scores(results_final_dir_apo, output_apo, best_structure_apo, f"{target_binder_input}_results_itr{itr + 1}_length{config['length']}", 0, boltz2=isinstance(boltz_model, Boltz2))
                     gc.collect()
                     torch.cuda.empty_cache()
