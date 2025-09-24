@@ -7,6 +7,7 @@ Once `boltz` is installed, you can run predictions with:
 * `<INPUT_PATH>` can be either a single .yaml or .fasta file (YAML is preferred; FASTA is deprecated), or a directory, in which case predictions will be run on all `.yaml` and `.fasta` files inside.
 * If you include `--use_msa_server`, the MSA will be generated automatically via the mmseqs2 server. Without this flag, you must provide a pre-computed MSA.
 * If you include `--use_potentials`, Boltz will apply inference-time potentials to improve the physical plausibility of the predicted poses.
+* Without the `--override` options, Boltz will try to use the cached preprocessed files and existing predictions, if any are present in your output directory (name of your input by default). Add the `--override` flag to run the prediction from scratch, e.g. if you change some parameters or complex details without changing the output directory.
 
 
 ## Input format
@@ -18,10 +19,10 @@ Below is the full schema (each section is described in detail afterward):
 sequences:
     - ENTITY_TYPE:
         id: CHAIN_ID 
-        sequence: SEQUENCE    # only for protein, dna, rna
+        sequence: SEQUENCE      # only for protein, dna, rna
         smiles: 'SMILES'        # only for ligand, exclusive with ccd
-        ccd: CCD              # only for ligand, exclusive with smiles
-        msa: MSA_PATH         # only for protein
+        ccd: CCD                # only for ligand, exclusive with smiles
+        msa: MSA_PATH           # only for protein
         modifications:
           - position: RES_IDX   # index of residue, starting from 1
             ccd: CCD            # CCD code of the modified residue
@@ -72,7 +73,7 @@ The sequences section has one entry per unique chain or molecule.
 For proteins:
 * By default, an `msa` must be provided.
 * If `--use_msa_server` is set, the MSA is auto-generated (so `msa` can be omitted).
-* To use a precomputed custom MSA, set `msa: MSA_PATH` pointing to a `.a3m` file. To indicate pairing keys across chains, use a CSV format instead of a3m with two columns: `sequence` (protein sequence) and `key` (a unique identifier for matching rows across chains).
+* To use a precomputed custom MSA, set `msa: MSA_PATH` pointing to a `.a3m` file. If you have more than one protein chain, use a CSV format instead of a3m with two columns: `sequence` (protein sequence) and `key` (a unique identifier for matching rows across chains). Sequences with the same key are mutually aligned.
 * To force single-sequence mode (not recommended, as it reduces accuracy), set `msa: empty`.
 
 The `modifications` field is optional and allows specification of modified residues in polymers (`protein`, `dna`, or `rna`).  
@@ -99,8 +100,8 @@ If you wish to explicitly define which of the chains in your YAML should be temp
 
 For any template you provide, you can also specify a `force` flag which will use a potential to enforce that the backbone does not deviate excessively from the template during the prediction. When using `force` one must specify also the `threshold` field which controls the distance (in Angstroms) that the prediction can deviate from the template. 
 
-### Properties
-`properties` is an optional field that allows you to specify whether you want to compute the affinity. If enabled, you must also provide the chain_id corresponding to the small molecule against which the affinity will be computed. Only one single molecule can be specified for affinity computation, and it must be a ligand chain (not a protein, DNA or RNA). At this point, Boltz only supports the computation of affinity of small molecules to protein targets, if ran with an RNA/DNA/co-factor target, the code will not crash but the output will be unreliable.
+### Properties (affinity)
+`properties` is an optional field that allows you to specify whether you want to compute the affinity. If enabled, you must also provide the chain_id corresponding to the small molecule against which the affinity will be computed. Only one single small molecule can be specified for affinity computation. It must be a ligand chain (not a protein, DNA or RNA) and has to be at most 128 atoms counting heavy atoms and hydrogens kept by `RDKit RemoveHs`, however, we do not recommend running the affinity module with ligands significantly larger than 56 atoms (counted as above, limit set during training). At this point, Boltz only supports the computation of affinity of small molecules to protein targets, if ran with an RNA/DNA/co-factor target, the code will not crash but the output will be unreliable.
 
 
 ### Example
@@ -240,7 +241,7 @@ There are two main predictions in the affinity output: `affinity_pred_value` and
 
 The `affinity_probability_binary` field should be used to detect binders from decoys, for example in a hit-discovery stage. It's value ranges from 0 to 1 and represents the predicted probability that the ligand is a binder.
 
-The `affinity_pred_value` aims to measure the specific affinity of different binders and how this changes with small modifications of the molecule. This should be used in ligand optimization stages such as hit-to-lead and lead-optimization. It reports a binding affinity value as `log(IC50)`, derived from an `IC50` measured in `μM`. Lower values indicate stronger predicted binding, for instance:
+The `affinity_pred_value` aims to measure the specific affinity of different binders and how this changes with small modifications of the molecule (*note that this implies that it should only be used when comparing different active molecules, not inactives*). This should be used in ligand optimization stages such as hit-to-lead and lead-optimization. It reports a binding affinity value as `log10(IC50)`, derived from an `IC50` measured in `μM`. Lower values indicate stronger predicted binding, for instance:
 - IC50 of $10^{-9}$ M $\longrightarrow$ our model outputs $-3$ (strong binder)
 - IC50 of $10^{-6}$ M $\longrightarrow$ our model outputs $0$ (moderate binder)
 - IC50 of $10^{-4}$ M $\longrightarrow$ our model outputs $2$ (weak binder / decoy)
