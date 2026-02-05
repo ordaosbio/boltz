@@ -1061,7 +1061,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     override: bool = False,
     seed: Optional[int] = None,
     use_msa_server: bool = False,
-    msa_server_url: str = "https://api.colabfold.com",
+    msa_server_url: str = "#",
     msa_pairing_strategy: str = "greedy",
     msa_server_username: Optional[str] = None,
     msa_server_password: Optional[str] = None,
