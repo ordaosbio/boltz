@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, List
 
 import torch
 from fairscale.nn.checkpoint.checkpoint_activations import checkpoint_wrapper
@@ -437,6 +437,15 @@ class PairformerModule(nn.Module):
         no_update_s: bool = False,
         no_update_z: bool = False,
         offload_to_cpu: bool = False,
+        scale_uniform_beta: float = 0.0,
+        scale_pair_beta: float = 0.0,
+        scale_pair_strategy: str = "pck",
+        scale_pair_index: int = 1,
+        scale_pair_weights: Optional[List[float]] = None,
+        scale_laplacian_beta: float = 0.0,
+        scale_laplacian_strategy: str = "pck",
+        scale_laplacian_index: int = 1,
+        scale_laplacian_weights: Optional[List[float]] = None,
         **kwargs,
     ) -> None:
         """Initialize the Pairformer module.
@@ -473,6 +482,18 @@ class PairformerModule(nn.Module):
         self.dropout = dropout
         self.num_heads = num_heads
 
+        self.scale_uniform_beta = scale_uniform_beta
+
+        self.scale_pair_beta = scale_pair_beta
+        self.scale_pair_strategy = scale_pair_strategy
+        self.scale_pair_index = scale_pair_index
+        self.scale_pair_weights = scale_pair_weights
+
+        self.scale_laplacian_beta = scale_laplacian_beta
+        self.scale_laplacian_strategy = scale_laplacian_strategy
+        self.scale_laplacian_index = scale_laplacian_index
+        self.scale_laplacian_weights = scale_laplacian_weights
+
         self.layers = nn.ModuleList()
         for i in range(num_blocks):
             if activation_checkpointing:
@@ -504,6 +525,94 @@ class PairformerModule(nn.Module):
                         False if i < num_blocks - 1 else no_update_z,
                     )
                 )
+
+    def _compute_sign_matrix(self, v: Tensor) -> Tensor:
+        sign_vec = v.sign()
+        return sign_vec.unsqueeze(-1) * sign_vec.unsqueeze(-2)
+
+    def _scale_uniform(self, z: Tensor) -> Tensor:
+        """Apply uniform scaling to *z* if enabled and return the scaled tensor."""
+        if self.scale_uniform_beta == 0.0:
+            return z
+        return z * (1.0 + self.scale_uniform_beta)
+
+    def _scale_pair(self, z: Tensor) -> Tensor:
+        """Apply pair scaling to *z* if enabled and return the scaled tensor."""
+        if self.scale_pair_beta == 0.0:
+            return z
+
+        with torch.no_grad():
+            # symmetric affinity matrix (L2-norm of pairwise features)
+            A = z.norm(dim=-1)
+            A = 0.5 * (A + A.transpose(1, 2))
+            eps = 1e-5 * torch.eye(A.size(-1), device=A.device, dtype=A.dtype)
+            eigvecs = torch.linalg.eigh(A + eps)[1]
+
+            if self.scale_pair_strategy == "pck":
+                k = max(1, min(self.scale_pair_index, eigvecs.size(-1)))
+                v = eigvecs[..., -k]
+            elif self.scale_pair_strategy == "mix":
+                w_raw = torch.tensor(
+                    self.scale_pair_weights or [0.7, 0.2, 0.1],
+                    device=A.device,
+                    dtype=A.dtype,
+                )
+                w = w_raw[:3] / w_raw[:3].sum()
+                v = (
+                    w[0] * eigvecs[..., -1]
+                    + w[1] * eigvecs[..., -2]
+                    + w[2] * eigvecs[..., -3]
+                )
+                v = v / v.norm(dim=-1, keepdim=True).clamp(min=1e-9)
+            else:
+                raise ValueError(
+                    f"Unsupported scale_pair_strategy: {self.scale_pair_strategy}"
+                )
+
+            S = self._compute_sign_matrix(v)
+
+        z = z * (1.0 + self.scale_pair_beta * S).unsqueeze(-1)
+        return z
+
+    def _scale_laplacian(self, z: Tensor) -> Tensor:
+        """Apply Laplacian scaling (graph partition heuristic) if enabled."""
+        if self.scale_laplacian_beta == 0.0:
+            return z
+
+        with torch.no_grad():
+            # build graph Laplacian from pairwise norms
+            A = z.norm(dim=-1)
+            D = torch.diag_embed(A.sum(-1))
+            L = D - A
+            eps = 1e-5 * torch.eye(L.size(-1), device=L.device, dtype=L.dtype)
+            eigvecs = torch.linalg.eigh(L + eps)[1]  # ascending order
+
+            if self.scale_laplacian_strategy == "pck":
+                # index 1 -> Fiedler vector (second smallest eigenvalue)
+                k = max(1, min(self.scale_laplacian_index, eigvecs.size(-1) - 1))
+                u = eigvecs[..., k]
+            elif self.scale_laplacian_strategy == "mix":
+                w_raw = torch.tensor(
+                    self.scale_laplacian_weights or [0.7, 0.2, 0.1],
+                    device=L.device,
+                    dtype=L.dtype,
+                )
+                w = w_raw[:3] / w_raw[:3].sum()
+                u = (
+                    w[0] * eigvecs[..., 1]
+                    + w[1] * eigvecs[..., 2]
+                    + w[2] * eigvecs[..., 3]
+                )
+                u = u / u.norm(dim=-1, keepdim=True).clamp(min=1e-9)
+            else:
+                raise ValueError(
+                    f"Unsupported scale_laplacian_strategy: {self.scale_laplacian_strategy}"
+                )
+
+            S_graph = self._compute_sign_matrix(u)
+
+        z = z * (1.0 + self.scale_laplacian_beta * S_graph).unsqueeze(-1)
+        return z
 
     def forward(
         self,
@@ -541,6 +650,14 @@ class PairformerModule(nn.Module):
                 chunk_size_tri_attn = 512
         else:
             chunk_size_tri_attn = None
+
+        # scaling pairwise features
+        if self.scale_uniform_beta != 0.0:
+            z = self._scale_uniform(z)
+        if self.scale_pair_beta != 0.0:
+            z = self._scale_pair(z)
+        if self.scale_laplacian_beta != 0.0:
+            z = self._scale_laplacian(z)
 
         for layer in self.layers:
             s, z = layer(
