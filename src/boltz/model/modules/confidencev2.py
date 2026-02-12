@@ -117,6 +117,7 @@ class ConfidenceModule(nn.Module):
         multiplicity=1,
         run_sequentially=False,
         use_kernels: bool = False,
+        low_memory: bool = False,
     ):
         if run_sequentially and multiplicity > 1:
             assert z.shape[0] == 1, "Not supported with batch size > 1"
@@ -133,6 +134,7 @@ class ConfidenceModule(nn.Module):
                         multiplicity=1,
                         run_sequentially=False,
                         use_kernels=use_kernels,
+                        low_memory=low_memory,
                     )
                 )
 
@@ -203,7 +205,8 @@ class ConfidenceModule(nn.Module):
         pair_mask = mask[:, :, None] * mask[:, None, :]
 
         s_t, z_t = self.pairformer_stack(
-            s, z, mask=mask, pair_mask=pair_mask, use_kernels=use_kernels
+            s, z, mask=mask, pair_mask=pair_mask, use_kernels=use_kernels,
+            low_memory=low_memory,
         )
 
         # AF3 has residual connections, we remove them

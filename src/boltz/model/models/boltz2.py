@@ -104,9 +104,11 @@ class Boltz2(LightningModule):
         checkpoint_diffusion_conditioning: bool = False,
         use_templates_v2: bool = False,
         use_kernels: bool = False,
+        low_memory: bool = False,
     ) -> None:
         super().__init__()
         self.save_hyperparameters(ignore=["validators"])
+        self.low_memory = low_memory
 
         # No random recycling
         self.no_random_recycling_training = no_random_recycling_training
@@ -427,6 +429,10 @@ class Boltz2(LightningModule):
             mask = feats["token_pad_mask"].float()
             pair_mask = mask[:, :, None] * mask[:, None, :]
 
+            # Offload z_init to CPU in low_memory mode
+            if self.low_memory:
+                z_init_cpu = z_init.cpu()
+
             for i in range(recycling_steps + 1):
                 with torch.set_grad_enabled(self.training and (i == recycling_steps)):
                     # Fixes an issue with unused parameters in autocast
@@ -439,7 +445,10 @@ class Boltz2(LightningModule):
 
                     # Apply recycling
                     s = s_init + self.s_recycle(self.s_norm(s))
-                    z = z_init + self.z_recycle(self.z_norm(z))
+                    if self.low_memory:
+                        z = z_init_cpu.cuda() + self.z_recycle(self.z_norm(z))
+                    else:
+                        z = z_init + self.z_recycle(self.z_norm(z))
 
                     # Revert to uncompiled version for validation
                     if self.is_pairformer_compiled and not self.training:
@@ -453,6 +462,7 @@ class Boltz2(LightningModule):
                         mask=mask,
                         pair_mask=pair_mask,
                         use_kernels=self.use_kernels,
+                        low_memory=self.low_memory,
                     )
 
             pdistogram = self.distogram_module.distogram(z+z.transpose(1, 2))
@@ -500,6 +510,7 @@ class Boltz2(LightningModule):
                 max_parallel_samples=None,
                 steering_args=self.steering_args,
                 diffusion_conditioning=diffusion_conditioning,
+                low_memory=self.low_memory,
             )
             dict_out.update(struct_out)
         # Detach structure outputs but not the inputs
@@ -537,6 +548,7 @@ class Boltz2(LightningModule):
                     multiplicity=diffusion_samples,
                     run_sequentially=run_confidence_sequentially,
                     use_kernels=self.use_kernels,
+                    low_memory=self.low_memory,
                 )
             )
 
@@ -583,6 +595,10 @@ class Boltz2(LightningModule):
             # Compute pairwise mask
             mask = feats["token_pad_mask"].float()
             pair_mask = mask[:, :, None] * mask[:, None, :]
+            # Offload z_init to CPU in low_memory mode
+            if self.low_memory:
+                z_init_cpu = z_init.cpu()
+
             if self.run_trunk_and_structure:
                 for i in range(recycling_steps + 1):
                     with torch.set_grad_enabled(
@@ -600,7 +616,10 @@ class Boltz2(LightningModule):
 
                         # Apply recycling
                         s = s_init + self.s_recycle(self.s_norm(s))
-                        z = z_init + self.z_recycle(self.z_norm(z))
+                        if self.low_memory:
+                            z = z_init_cpu.cuda() + self.z_recycle(self.z_norm(z))
+                        else:
+                            z = z_init + self.z_recycle(self.z_norm(z))
 
                         # Compute pairwise stack
                         if self.use_templates:
@@ -618,9 +637,20 @@ class Boltz2(LightningModule):
                         else:
                             msa_module = self.msa_module
 
-                        z = z + msa_module(
-                            z, s_inputs, feats, use_kernels=self.use_kernels
-                        )
+                        if self.low_memory:
+                            feats["msa"] = feats["msa"].cuda() if feats["msa"].device.type == "cpu" else feats["msa"]
+                            z_orig = z.cpu()
+                            z = msa_module(
+                                z, s_inputs, feats, use_kernels=self.use_kernels,
+                                low_memory=True,
+                            )
+                            z += z_orig.cuda()
+                            del z_orig
+                            feats["msa"] = feats["msa"].cpu()
+                        else:
+                            z = z + msa_module(
+                                z, s_inputs, feats, use_kernels=self.use_kernels
+                            )
 
                         # Revert to uncompiled version for validation
                         if self.is_pairformer_compiled and not self.training:
@@ -634,6 +664,7 @@ class Boltz2(LightningModule):
                             mask=mask,
                             pair_mask=pair_mask,
                             use_kernels=self.use_kernels,
+                            low_memory=self.low_memory,
                         )
 
             pdistogram = self.distogram_module(z)
@@ -688,6 +719,7 @@ class Boltz2(LightningModule):
                         max_parallel_samples=max_parallel_samples,
                         steering_args=self.steering_args,
                         diffusion_conditioning=diffusion_conditioning,
+                        low_memory=self.low_memory,
                     )
                     dict_out.update(struct_out)
 
@@ -750,6 +782,7 @@ class Boltz2(LightningModule):
                     multiplicity=diffusion_samples,
                     run_sequentially=run_confidence_sequentially,
                     use_kernels=self.use_kernels,
+                    low_memory=self.low_memory,
                 )
             )
 

@@ -71,35 +71,57 @@ class PairformerLayer(nn.Module):
         use_kernels: bool = False,
         use_cuequiv_mul: bool = False,
         use_cuequiv_attn: bool = False,
+        low_memory: bool = False,
     ) -> tuple[Tensor, Tensor]:
         # Compute pairwise stack
-        dropout = get_dropout_mask(self.dropout, z, self.training)
-        z = z + dropout * self.tri_mul_out(
-            z, mask=pair_mask, use_kernels=use_cuequiv_mul or use_kernels
-        )
+        if low_memory:
+            z += self.tri_mul_out(
+                z, mask=pair_mask, use_kernels=use_cuequiv_mul or use_kernels, low_memory=True
+            )
+            z += self.tri_mul_in(
+                z, mask=pair_mask, use_kernels=use_cuequiv_mul or use_kernels, low_memory=True
+            )
+            z += self.tri_att_start(
+                z,
+                mask=pair_mask,
+                chunk_size=chunk_size_tri_attn,
+                use_kernels=use_cuequiv_attn or use_kernels,
+            )
+            z += self.tri_att_end(
+                z,
+                mask=pair_mask,
+                chunk_size=chunk_size_tri_attn,
+                use_kernels=use_cuequiv_attn or use_kernels,
+            )
+            z += self.transition_z(z)
+        else:
+            dropout = get_dropout_mask(self.dropout, z, self.training)
+            z = z + dropout * self.tri_mul_out(
+                z, mask=pair_mask, use_kernels=use_cuequiv_mul or use_kernels
+            )
 
-        dropout = get_dropout_mask(self.dropout, z, self.training)
-        z = z + dropout * self.tri_mul_in(
-            z, mask=pair_mask, use_kernels=use_cuequiv_mul or use_kernels
-        )
+            dropout = get_dropout_mask(self.dropout, z, self.training)
+            z = z + dropout * self.tri_mul_in(
+                z, mask=pair_mask, use_kernels=use_cuequiv_mul or use_kernels
+            )
 
-        dropout = get_dropout_mask(self.dropout, z, self.training)
-        z = z + dropout * self.tri_att_start(
-            z,
-            mask=pair_mask,
-            chunk_size=chunk_size_tri_attn,
-            use_kernels=use_cuequiv_attn or use_kernels,
-        )
+            dropout = get_dropout_mask(self.dropout, z, self.training)
+            z = z + dropout * self.tri_att_start(
+                z,
+                mask=pair_mask,
+                chunk_size=chunk_size_tri_attn,
+                use_kernels=use_cuequiv_attn or use_kernels,
+            )
 
-        dropout = get_dropout_mask(self.dropout, z, self.training, columnwise=True)
-        z = z + dropout * self.tri_att_end(
-            z,
-            mask=pair_mask,
-            chunk_size=chunk_size_tri_attn,
-            use_kernels=use_cuequiv_attn or use_kernels,
-        )
+            dropout = get_dropout_mask(self.dropout, z, self.training, columnwise=True)
+            z = z + dropout * self.tri_att_end(
+                z,
+                mask=pair_mask,
+                chunk_size=chunk_size_tri_attn,
+                use_kernels=use_cuequiv_attn or use_kernels,
+            )
 
-        z = z + self.transition_z(z)
+            z = z + self.transition_z(z)
 
         # Compute sequence stack
         with torch.autocast("cuda", enabled=False):
@@ -270,6 +292,7 @@ class PairformerModule(nn.Module):
         mask: Tensor,
         pair_mask: Tensor,
         use_kernels: bool = False,
+        low_memory: bool = False,
     ) -> tuple[Tensor, Tensor]:
         """Perform the forward pass.
 
@@ -285,9 +308,13 @@ class PairformerModule(nn.Module):
             The pairwise mask.
         use_kernels : bool
             Whether to use kernels.
+        low_memory : bool
+            Whether to use low memory mode.
 
         """
-        if not self.training:
+        if low_memory:
+            chunk_size_tri_attn = 128
+        elif not self.training:
             if z.shape[1] > const.chunk_size_threshold:
                 chunk_size_tri_attn = 128
             else:
@@ -315,7 +342,10 @@ class PairformerModule(nn.Module):
                     use_kernels,
                 )
             else:
-                s, z = layer(s, z, mask, pair_mask, chunk_size_tri_attn, use_kernels)
+                s, z = layer(
+                    s, z, mask, pair_mask, chunk_size_tri_attn, use_kernels,
+                    low_memory=low_memory,
+                )
         return s, z
 
 
@@ -355,35 +385,57 @@ class PairformerNoSeqLayer(nn.Module):
         use_kernels: bool = False,
         use_cuequiv_mul: bool = False,
         use_cuequiv_attn: bool = False,
+        low_memory: bool = False,
     ) -> Tensor:
         # Compute pairwise stack
-        dropout = get_dropout_mask(self.dropout, z, self.training)
-        z = z + dropout * self.tri_mul_out(
-            z, mask=pair_mask, use_kernels=use_cuequiv_mul or use_kernels
-        )
+        if low_memory:
+            z += self.tri_mul_out(
+                z, mask=pair_mask, use_kernels=use_cuequiv_mul or use_kernels, low_memory=True
+            )
+            z += self.tri_mul_in(
+                z, mask=pair_mask, use_kernels=use_cuequiv_mul or use_kernels, low_memory=True
+            )
+            z += self.tri_att_start(
+                z,
+                mask=pair_mask,
+                chunk_size=chunk_size_tri_attn,
+                use_kernels=use_cuequiv_attn or use_kernels,
+            )
+            z += self.tri_att_end(
+                z,
+                mask=pair_mask,
+                chunk_size=chunk_size_tri_attn,
+                use_kernels=use_cuequiv_attn or use_kernels,
+            )
+            z += self.transition_z(z)
+        else:
+            dropout = get_dropout_mask(self.dropout, z, self.training)
+            z = z + dropout * self.tri_mul_out(
+                z, mask=pair_mask, use_kernels=use_cuequiv_mul or use_kernels
+            )
 
-        dropout = get_dropout_mask(self.dropout, z, self.training)
-        z = z + dropout * self.tri_mul_in(
-            z, mask=pair_mask, use_kernels=use_cuequiv_mul or use_kernels
-        )
+            dropout = get_dropout_mask(self.dropout, z, self.training)
+            z = z + dropout * self.tri_mul_in(
+                z, mask=pair_mask, use_kernels=use_cuequiv_mul or use_kernels
+            )
 
-        dropout = get_dropout_mask(self.dropout, z, self.training)
-        z = z + dropout * self.tri_att_start(
-            z,
-            mask=pair_mask,
-            chunk_size=chunk_size_tri_attn,
-            use_kernels=use_cuequiv_attn or use_kernels,
-        )
+            dropout = get_dropout_mask(self.dropout, z, self.training)
+            z = z + dropout * self.tri_att_start(
+                z,
+                mask=pair_mask,
+                chunk_size=chunk_size_tri_attn,
+                use_kernels=use_cuequiv_attn or use_kernels,
+            )
 
-        dropout = get_dropout_mask(self.dropout, z, self.training, columnwise=True)
-        z = z + dropout * self.tri_att_end(
-            z,
-            mask=pair_mask,
-            chunk_size=chunk_size_tri_attn,
-            use_kernels=use_cuequiv_attn or use_kernels,
-        )
+            dropout = get_dropout_mask(self.dropout, z, self.training, columnwise=True)
+            z = z + dropout * self.tri_att_end(
+                z,
+                mask=pair_mask,
+                chunk_size=chunk_size_tri_attn,
+                use_kernels=use_cuequiv_attn or use_kernels,
+            )
 
-        z = z + self.transition_z(z)
+            z = z + self.transition_z(z)
         return z
 
 
@@ -425,8 +477,11 @@ class PairformerNoSeqModule(nn.Module):
         z: Tensor,
         pair_mask: Tensor,
         use_kernels: bool = False,
+        low_memory: bool = False,
     ) -> Tensor:
-        if not self.training:
+        if low_memory:
+            chunk_size_tri_attn = 128
+        elif not self.training:
             if z.shape[1] > const.chunk_size_threshold:
                 chunk_size_tri_attn = 128
             else:
@@ -449,5 +504,6 @@ class PairformerNoSeqModule(nn.Module):
                     pair_mask,
                     chunk_size_tri_attn,
                     use_kernels,
+                    low_memory=low_memory,
                 )
         return z

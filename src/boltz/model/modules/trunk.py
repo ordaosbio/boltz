@@ -209,6 +209,7 @@ class MSAModule(nn.Module):
         emb: Tensor,
         feats: dict[str, Tensor],
         use_kernels: bool = False,
+        low_memory: bool = False,
     ) -> Tensor:
         """Perform the forward pass.
 
@@ -228,7 +229,13 @@ class MSAModule(nn.Module):
 
         """
         # Set chunk sizes
-        if not self.training:
+        if low_memory:
+            chunk_heads_pwa = True
+            chunk_size_transition_z = 64
+            chunk_size_transition_msa = 32
+            chunk_size_outer_product = 4
+            chunk_size_tri_attn = 128
+        elif not self.training:
             if z.shape[1] > const.chunk_size_threshold:
                 chunk_heads_pwa = True
                 chunk_size_transition_z = 64
@@ -285,6 +292,7 @@ class MSAModule(nn.Module):
                 chunk_size_outer_product,
                 chunk_size_tri_attn,
                 use_kernels=use_kernels,
+                low_memory=low_memory,
             )
         return z
 
@@ -361,6 +369,7 @@ class MSALayer(nn.Module):
         chunk_size_outer_product: int = None,
         chunk_size_tri_attn: int = None,
         use_kernels: bool = False,
+        low_memory: bool = False,
     ) -> tuple[Tensor, Tensor]:
         """Perform the forward pass.
 
@@ -383,40 +392,59 @@ class MSALayer(nn.Module):
             The output MSA embeddings.
 
         """
-        # Communication to MSA stack
-        msa_dropout = get_dropout_mask(self.msa_dropout, m, self.training)
-        m = m + msa_dropout * self.pair_weighted_averaging(
-            m, z, token_mask, chunk_heads_pwa
-        )
-        m = m + self.msa_transition(m, chunk_size_transition_msa)
+        if low_memory:
+            # Communication to MSA stack (in-place)
+            m += self.pair_weighted_averaging(m, z, token_mask, chunk_heads_pwa)
+            m += self.msa_transition(m, chunk_size_transition_msa)
 
-        # Communication to pairwise stack
-        z = z + self.outer_product_mean(m, msa_mask, chunk_size_outer_product)
+            # Communication to pairwise stack
+            z += self.outer_product_mean(m, msa_mask, chunk_size_outer_product)
 
-        # Compute pairwise stack
-        dropout = get_dropout_mask(self.z_dropout, z, self.training)
-        z = z + dropout * self.tri_mul_out(z, mask=token_mask)
+            # Compute pairwise stack (in-place, skip dropout)
+            z += self.tri_mul_out(z, mask=token_mask, low_memory=True)
+            z += self.tri_mul_in(z, mask=token_mask, low_memory=True)
+            z += self.tri_att_start(
+                z, mask=token_mask, chunk_size=chunk_size_tri_attn, use_kernels=use_kernels,
+            )
+            z += self.tri_att_end(
+                z, mask=token_mask, chunk_size=chunk_size_tri_attn, use_kernels=use_kernels,
+            )
+            z += self.z_transition(z, chunk_size_transition_z)
+        else:
+            # Communication to MSA stack
+            msa_dropout = get_dropout_mask(self.msa_dropout, m, self.training)
+            m = m + msa_dropout * self.pair_weighted_averaging(
+                m, z, token_mask, chunk_heads_pwa
+            )
+            m = m + self.msa_transition(m, chunk_size_transition_msa)
 
-        dropout = get_dropout_mask(self.z_dropout, z, self.training)
-        z = z + dropout * self.tri_mul_in(z, mask=token_mask)
+            # Communication to pairwise stack
+            z = z + self.outer_product_mean(m, msa_mask, chunk_size_outer_product)
 
-        dropout = get_dropout_mask(self.z_dropout, z, self.training)
-        z = z + dropout * self.tri_att_start(
-            z,
-            mask=token_mask,
-            chunk_size=chunk_size_tri_attn,
-            use_kernels=use_kernels,
-        )
+            # Compute pairwise stack
+            dropout = get_dropout_mask(self.z_dropout, z, self.training)
+            z = z + dropout * self.tri_mul_out(z, mask=token_mask)
 
-        dropout = get_dropout_mask(self.z_dropout, z, self.training, columnwise=True)
-        z = z + dropout * self.tri_att_end(
-            z,
-            mask=token_mask,
-            chunk_size=chunk_size_tri_attn,
-            use_kernels=use_kernels,
-        )
+            dropout = get_dropout_mask(self.z_dropout, z, self.training)
+            z = z + dropout * self.tri_mul_in(z, mask=token_mask)
 
-        z = z + self.z_transition(z, chunk_size_transition_z)
+            dropout = get_dropout_mask(self.z_dropout, z, self.training)
+            z = z + dropout * self.tri_att_start(
+                z,
+                mask=token_mask,
+                chunk_size=chunk_size_tri_attn,
+                use_kernels=use_kernels,
+            )
+
+            dropout = get_dropout_mask(self.z_dropout, z, self.training, columnwise=True)
+            z = z + dropout * self.tri_att_end(
+                z,
+                mask=token_mask,
+                chunk_size=chunk_size_tri_attn,
+                use_kernels=use_kernels,
+            )
+
+            z = z + self.z_transition(z, chunk_size_transition_z)
 
         return z, m
 
@@ -622,6 +650,7 @@ class PairformerModule(nn.Module):
         pair_mask: Tensor,
         chunk_size_tri_attn: Optional[int] = None,
         use_kernels: bool = False,
+        low_memory: bool = False,
     ) -> tuple[Tensor, Tensor]:
         """Perform the forward pass.
 
@@ -643,7 +672,9 @@ class PairformerModule(nn.Module):
             The updated pairwise embeddings.
 
         """
-        if not self.training:
+        if low_memory:
+            chunk_size_tri_attn = 128
+        elif not self.training:
             if z.shape[1] > const.chunk_size_threshold:
                 chunk_size_tri_attn = 128
             else:
@@ -667,6 +698,7 @@ class PairformerModule(nn.Module):
                 pair_mask,
                 chunk_size_tri_attn,
                 use_kernels=use_kernels,
+                low_memory=low_memory,
             )
         return s, z
 
@@ -735,32 +767,45 @@ class PairformerLayer(nn.Module):
         pair_mask: Tensor,
         chunk_size_tri_attn: Optional[int] = None,
         use_kernels: bool = False,
+        low_memory: bool = False,
     ) -> tuple[Tensor, Tensor]:
         """Perform the forward pass."""
-        # Compute pairwise stack
-        dropout = get_dropout_mask(self.dropout, z, self.training)
-        z = z + dropout * self.tri_mul_out(z, mask=pair_mask)
+        if low_memory:
+            # Compute pairwise stack (in-place, skip dropout)
+            z += self.tri_mul_out(z, mask=pair_mask, low_memory=True)
+            z += self.tri_mul_in(z, mask=pair_mask, low_memory=True)
+            z += self.tri_att_start(
+                z, mask=pair_mask, chunk_size=chunk_size_tri_attn, use_kernels=use_kernels,
+            )
+            z += self.tri_att_end(
+                z, mask=pair_mask, chunk_size=chunk_size_tri_attn, use_kernels=use_kernels,
+            )
+            z += self.transition_z(z)
+        else:
+            # Compute pairwise stack
+            dropout = get_dropout_mask(self.dropout, z, self.training)
+            z = z + dropout * self.tri_mul_out(z, mask=pair_mask)
 
-        dropout = get_dropout_mask(self.dropout, z, self.training)
-        z = z + dropout * self.tri_mul_in(z, mask=pair_mask)
+            dropout = get_dropout_mask(self.dropout, z, self.training)
+            z = z + dropout * self.tri_mul_in(z, mask=pair_mask)
 
-        dropout = get_dropout_mask(self.dropout, z, self.training)
-        z = z + dropout * self.tri_att_start(
-            z,
-            mask=pair_mask,
-            chunk_size=chunk_size_tri_attn,
-            use_kernels=use_kernels,
-        )
+            dropout = get_dropout_mask(self.dropout, z, self.training)
+            z = z + dropout * self.tri_att_start(
+                z,
+                mask=pair_mask,
+                chunk_size=chunk_size_tri_attn,
+                use_kernels=use_kernels,
+            )
 
-        dropout = get_dropout_mask(self.dropout, z, self.training, columnwise=True)
-        z = z + dropout * self.tri_att_end(
-            z,
-            mask=pair_mask,
-            chunk_size=chunk_size_tri_attn,
-            use_kernels=use_kernels,
-        )
+            dropout = get_dropout_mask(self.dropout, z, self.training, columnwise=True)
+            z = z + dropout * self.tri_att_end(
+                z,
+                mask=pair_mask,
+                chunk_size=chunk_size_tri_attn,
+                use_kernels=use_kernels,
+            )
 
-        z = z + self.transition_z(z)
+            z = z + self.transition_z(z)
 
         # Compute sequence stack
         if not self.no_update_s:

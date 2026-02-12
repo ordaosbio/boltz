@@ -121,6 +121,7 @@ class DiffusionModule(Module):
         feats,
         diffusion_conditioning,
         multiplicity=1,
+        low_memory=False,
     ):
         if self.activation_checkpointing and self.training:
             s, normed_fourier = torch.utils.checkpoint.checkpoint(
@@ -148,7 +149,10 @@ class DiffusionModule(Module):
         )
 
         # Full self-attention on token level
-        a = a + self.s_to_a_linear(s)
+        if low_memory:
+            a += self.s_to_a_linear(s)
+        else:
+            a = a + self.s_to_a_linear(s)
 
         mask = feats["token_pad_mask"].repeat_interleave(multiplicity, 0)
         a = self.token_transformer(
@@ -299,6 +303,7 @@ class AtomDiffusion(Module):
         multiplicity=1,
         max_parallel_samples=None,
         steering_args=None,
+        low_memory=False,
         **network_condition_kwargs,
     ):
         if steering_args is not None and "physical_guidance_update" not in steering_args:
@@ -400,6 +405,7 @@ class AtomDiffusion(Module):
                         t_hat,
                         network_condition_kwargs=dict(
                             multiplicity=sample_ids_chunk.numel(),
+                            low_memory=low_memory,
                             **network_condition_kwargs,
                         ),
                     )

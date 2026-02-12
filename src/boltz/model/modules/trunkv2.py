@@ -570,6 +570,7 @@ class MSAModule(nn.Module):
         emb: Tensor,
         feats: dict[str, Tensor],
         use_kernels: bool = False,
+        low_memory: bool = False,
     ) -> Tensor:
         """Perform the forward pass.
 
@@ -583,6 +584,8 @@ class MSAModule(nn.Module):
             Input features
         use_kernels: bool
             Whether to use kernels for triangular updates
+        low_memory: bool
+            Whether to use low memory mode
 
         Returns
         -------
@@ -591,7 +594,13 @@ class MSAModule(nn.Module):
 
         """
         # Set chunk sizes
-        if not self.training:
+        if low_memory:
+            chunk_heads_pwa = True
+            chunk_size_transition_z = 64
+            chunk_size_transition_msa = 32
+            chunk_size_outer_product = 4
+            chunk_size_tri_attn = 128
+        elif not self.training:
             if z.shape[1] > const.chunk_size_threshold:
                 chunk_heads_pwa = True
                 chunk_size_transition_z = 64
@@ -666,6 +675,7 @@ class MSAModule(nn.Module):
                     chunk_size_outer_product,
                     chunk_size_tri_attn,
                     use_kernels,
+                    low_memory=low_memory,
                 )
         return z
 
@@ -724,6 +734,7 @@ class MSALayer(nn.Module):
         chunk_size_outer_product: int = None,
         chunk_size_tri_attn: int = None,
         use_kernels: bool = False,
+        low_memory: bool = False,
     ) -> tuple[Tensor, Tensor]:
         """Perform the forward pass.
 
@@ -742,19 +753,32 @@ class MSALayer(nn.Module):
             The output pairwise embeddings.
 
         """
-        # Communication to MSA stack
-        msa_dropout = get_dropout_mask(self.msa_dropout, m, self.training)
-        m = m + msa_dropout * self.pair_weighted_averaging(
-            m, z, token_mask, chunk_heads_pwa
-        )
-        m = m + self.msa_transition(m, chunk_size_transition_msa)
+        if low_memory:
+            # Communication to MSA stack (in-place, skip dropout)
+            m += self.pair_weighted_averaging(m, z, token_mask, chunk_heads_pwa)
+            m += self.msa_transition(m, chunk_size_transition_msa)
 
-        z = z + self.outer_product_mean(m, msa_mask, chunk_size_outer_product)
+            z += self.outer_product_mean(m, msa_mask, chunk_size_outer_product)
 
-        # Compute pairwise stack
-        z = self.pairformer_layer(
-            z, token_mask, chunk_size_tri_attn, use_kernels=use_kernels
-        )
+            # Compute pairwise stack
+            z = self.pairformer_layer(
+                z, token_mask, chunk_size_tri_attn, use_kernels=use_kernels,
+                low_memory=True,
+            )
+        else:
+            # Communication to MSA stack
+            msa_dropout = get_dropout_mask(self.msa_dropout, m, self.training)
+            m = m + msa_dropout * self.pair_weighted_averaging(
+                m, z, token_mask, chunk_heads_pwa
+            )
+            m = m + self.msa_transition(m, chunk_size_transition_msa)
+
+            z = z + self.outer_product_mean(m, msa_mask, chunk_size_outer_product)
+
+            # Compute pairwise stack
+            z = self.pairformer_layer(
+                z, token_mask, chunk_size_tri_attn, use_kernels=use_kernels
+            )
 
         return z, m
 

@@ -77,10 +77,12 @@ class Boltz1(LightningModule):
         predict_args: Optional[dict[str, Any]] = None,
         steering_args: Optional[dict[str, Any]] = None,
         use_kernels: bool = False,
+        low_memory: bool = False,
     ) -> None:
         super().__init__()
 
         self.save_hyperparameters()
+        self.low_memory = low_memory
 
         self.lddt = nn.ModuleDict()
         self.disto_lddt = nn.ModuleDict()
@@ -294,6 +296,10 @@ class Boltz1(LightningModule):
             mask = feats["token_pad_mask"].float()
             pair_mask = mask[:, :, None] * mask[:, None, :]
 
+            # Offload z_init to CPU in low_memory mode
+            if self.low_memory:
+                z_init_cpu = z_init.cpu()
+
             for i in range(recycling_steps + 1):
                 with torch.set_grad_enabled(self.training and (i == recycling_steps)):
                     # Fixes an issue with unused parameters in autocast
@@ -306,13 +312,28 @@ class Boltz1(LightningModule):
 
                     # Apply recycling
                     s = s_init + self.s_recycle(self.s_norm(s))
-                    z = z_init + self.z_recycle(self.z_norm(z))
+                    if self.low_memory:
+                        z = z_init_cpu.cuda() + self.z_recycle(self.z_norm(z))
+                    else:
+                        z = z_init + self.z_recycle(self.z_norm(z))
 
                     # Compute pairwise stack
                     if not self.no_msa:
-                        z = z + self.msa_module(
-                            z, s_inputs, feats, use_kernels=self.use_kernels
-                        )
+                        if self.low_memory:
+                            # Offload MSA features to CPU after use
+                            feats["msa"] = feats["msa"].cuda() if feats["msa"].device.type == "cpu" else feats["msa"]
+                            z_orig = z.cpu()
+                            z = self.msa_module(
+                                z, s_inputs, feats, use_kernels=self.use_kernels,
+                                low_memory=True,
+                            )
+                            z += z_orig.cuda()
+                            del z_orig
+                            feats["msa"] = feats["msa"].cpu()
+                        else:
+                            z = z + self.msa_module(
+                                z, s_inputs, feats, use_kernels=self.use_kernels
+                            )
 
                     # Revert to uncompiled version for validation
                     if self.is_pairformer_compiled and not self.training:
@@ -326,6 +347,7 @@ class Boltz1(LightningModule):
                         mask=mask,
                         pair_mask=pair_mask,
                         use_kernels=self.use_kernels,
+                        low_memory=self.low_memory,
                     )
 
             pdistogram = self.distogram_module(z)
@@ -355,6 +377,7 @@ class Boltz1(LightningModule):
             atom_mask=feats["atom_pad_mask"],
             multiplicity=diffusion_samples,
             train_accumulate_token_repr=self.training,
+            low_memory=self.low_memory,
         )
         # Detach structure outputs but not the inputs
         dict_out.update({
@@ -396,6 +419,7 @@ class Boltz1(LightningModule):
                     multiplicity=diffusion_samples,
                     run_sequentially=run_confidence_sequentially,
                     use_kernels=self.use_kernels,
+                    low_memory=self.low_memory,
                 )
             )
 
@@ -449,6 +473,7 @@ class Boltz1(LightningModule):
                     max_parallel_samples=max_parallel_samples,
                     train_accumulate_token_repr=self.training,
                     steering_args=self.steering_args,
+                    low_memory=self.low_memory,
                 )
             )
 
@@ -469,6 +494,7 @@ class Boltz1(LightningModule):
                     multiplicity=diffusion_samples,
                     run_sequentially=run_confidence_sequentially,
                     use_kernels=self.use_kernels,
+                    low_memory=self.low_memory,
                 )
             )
         if self.confidence_prediction and self.confidence_module.use_s_diffusion:

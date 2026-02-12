@@ -74,6 +74,15 @@ class PairformerArgs:
     activation_checkpointing: bool = False
     offload_to_cpu: bool = False
     v2: bool = False
+    scale_uniform_beta: float = 0.0
+    scale_pair_beta: float = 0.0
+    scale_pair_strategy: str = "pck"
+    scale_pair_index: int = 1
+    scale_pair_weights: Optional[list[float]] = None
+    scale_laplacian_beta: float = 0.0
+    scale_laplacian_strategy: str = "pck"
+    scale_laplacian_index: int = 1
+    scale_laplacian_weights: Optional[list[float]] = None
 
 
 @dataclass
@@ -86,6 +95,15 @@ class PairformerArgsV2:
     activation_checkpointing: bool = False
     offload_to_cpu: bool = False
     v2: bool = True
+    scale_uniform_beta: float = 0.0
+    scale_pair_beta: float = 0.0
+    scale_pair_strategy: str = "pck"
+    scale_pair_index: int = 1
+    scale_pair_weights: Optional[list[float]] = None
+    scale_laplacian_beta: float = 0.0
+    scale_laplacian_strategy: str = "pck"
+    scale_laplacian_index: int = 1
+    scale_laplacian_weights: Optional[list[float]] = None
 
 
 @dataclass
@@ -765,12 +783,26 @@ def predict(  # noqa: C901, PLR0915, PLR0912
     subsample_msa: bool = True,
     num_subsampled_msa: int = 1024,
     no_kernels: bool = False,
+    low_memory: bool = False,
+    scale_uniform_beta: float = 0.0,
+    scale_pair_beta: float = 0.0,
+    scale_pair_strategy: str = "pck",
+    scale_pair_index: int = 1,
+    scale_pair_weights: Optional[list[float]] = None,
+    scale_laplacian_beta: float = 0.0,
+    scale_laplacian_strategy: str = "pck",
+    scale_laplacian_index: int = 1,
+    scale_laplacian_weights: Optional[list[float]] = None,
 ) -> None:
     """Run predictions with Boltz."""
     # If cpu, write a friendly warning
     if accelerator == "cpu":
         msg = "Running on CPU, this will be slow. Consider using a GPU."
         logger.info(msg)
+
+    # Set expandable segments for low memory mode
+    if low_memory:
+        os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
     # Supress some lightning warnings
     warnings.filterwarnings(
@@ -900,12 +932,32 @@ def predict(  # noqa: C901, PLR0915, PLR0912
         diffusion_params = Boltz2DiffusionParams()
         step_scale = 1.5 if step_scale is None else step_scale
         diffusion_params.step_scale = step_scale
-        pairformer_args = PairformerArgsV2()
+        pairformer_args = PairformerArgsV2(
+            scale_uniform_beta=scale_uniform_beta,
+            scale_pair_beta=scale_pair_beta,
+            scale_pair_strategy=scale_pair_strategy,
+            scale_pair_index=scale_pair_index,
+            scale_pair_weights=scale_pair_weights,
+            scale_laplacian_beta=scale_laplacian_beta,
+            scale_laplacian_strategy=scale_laplacian_strategy,
+            scale_laplacian_index=scale_laplacian_index,
+            scale_laplacian_weights=scale_laplacian_weights,
+        )
     else:
         diffusion_params = BoltzDiffusionParams()
         step_scale = 1.638 if step_scale is None else step_scale
         diffusion_params.step_scale = step_scale
-        pairformer_args = PairformerArgs()
+        pairformer_args = PairformerArgs(
+            scale_uniform_beta=scale_uniform_beta,
+            scale_pair_beta=scale_pair_beta,
+            scale_pair_strategy=scale_pair_strategy,
+            scale_pair_index=scale_pair_index,
+            scale_pair_weights=scale_pair_weights,
+            scale_laplacian_beta=scale_laplacian_beta,
+            scale_laplacian_strategy=scale_laplacian_strategy,
+            scale_laplacian_index=scale_laplacian_index,
+            scale_laplacian_weights=scale_laplacian_weights,
+        )
 
     msa_args = MSAModuleArgs(
         subsample_msa=subsample_msa,
@@ -992,6 +1044,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             pairformer_args=asdict(pairformer_args),
             msa_args=asdict(msa_args),
             steering_args=asdict(steering_args),
+            low_memory=low_memory,
         )
         model_module.eval()
 
@@ -1064,6 +1117,7 @@ def predict(  # noqa: C901, PLR0915, PLR0912
             msa_args=asdict(msa_args),
             steering_args={"fk_steering": False, "guidance_update": False},
             affinity_mw_correction=affinity_mw_correction,
+            low_memory=low_memory,
         )
         model_module.eval()
 

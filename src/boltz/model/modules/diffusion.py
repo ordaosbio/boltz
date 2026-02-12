@@ -176,6 +176,7 @@ class DiffusionModule(Module):
         feats,
         multiplicity=1,
         model_cache=None,
+        low_memory=False,
     ):
         s, normed_fourier = self.single_conditioner(
             times=times,
@@ -201,7 +202,10 @@ class DiffusionModule(Module):
         )
 
         # Full self-attention on token level
-        a = a + self.s_to_a_linear(s)
+        if low_memory:
+            a += self.s_to_a_linear(s)
+        else:
+            a = a + self.s_to_a_linear(s)
 
         mask = feats["token_pad_mask"].repeat_interleave(multiplicity, 0)
         a = self.token_transformer(
@@ -454,6 +458,7 @@ class AtomDiffusion(Module):
         max_parallel_samples=None,
         train_accumulate_token_repr=False,
         steering_args=None,
+        low_memory=False,
         **network_condition_kwargs,
     ):
         if steering_args is not None and (
@@ -548,6 +553,7 @@ class AtomDiffusion(Module):
                             network_condition_kwargs=dict(
                                 multiplicity=sample_ids_chunk.numel(),
                                 model_cache=model_cache,
+                                low_memory=low_memory,
                                 **network_condition_kwargs,
                             ),
                         )

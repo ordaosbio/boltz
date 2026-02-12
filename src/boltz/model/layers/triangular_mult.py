@@ -70,7 +70,9 @@ class TriangleMultiplicationOutgoing(nn.Module):
         init.final_init_(self.p_out.weight)
         init.gating_init_(self.g_out.weight)
 
-    def forward(self, x: Tensor, mask: Tensor, use_kernels: bool = False) -> Tensor:
+    def forward(
+        self, x: Tensor, mask: Tensor, use_kernels: bool = False, low_memory: bool = False
+    ) -> Tensor:
         """Perform a forward pass.
 
         Parameters
@@ -81,6 +83,8 @@ class TriangleMultiplicationOutgoing(nn.Module):
             The input mask of shape (B, N, N)
         use_kernels: bool
             Whether to use the kernel
+        low_memory: bool
+            Whether to use low memory mode
 
         Returns
         -------
@@ -107,10 +111,31 @@ class TriangleMultiplicationOutgoing(nn.Module):
         # Input gating: D -> D
         x = self.norm_in(x)
         x_in = x
-        x = self.p_in(x) * self.g_in(x).sigmoid()
 
-        # Apply mask
-        x = x * mask.unsqueeze(-1)
+        if low_memory:
+            # Chunked gate computation to reduce peak memory
+            nchunks = 4
+            chunk_bounds = torch.linspace(
+                0, x.shape[2], steps=nchunks + 1, device=x.device
+            ).long()
+            x = torch.empty(
+                (x.shape[0], x.shape[1], x.shape[2], x.shape[3] * 2),
+                device=x.device,
+                dtype=x_in.dtype,
+            )
+            for i in range(nchunks):
+                start = chunk_bounds[i].item()
+                end = chunk_bounds[i + 1].item()
+                x[:, :, start:end, :] = (
+                    self.p_in(x_in[:, :, start:end, :])
+                    * self.g_in(x_in[:, :, start:end, :]).sigmoid()
+                )
+            # In-place mask application
+            x *= mask.unsqueeze(-1)
+        else:
+            x = self.p_in(x) * self.g_in(x).sigmoid()
+            # Apply mask
+            x = x * mask.unsqueeze(-1)
 
         # Split input and cast to float
         a, b = torch.chunk(x.float(), 2, dim=-1)
@@ -158,7 +183,9 @@ class TriangleMultiplicationIncoming(nn.Module):
         init.final_init_(self.p_out.weight)
         init.gating_init_(self.g_out.weight)
 
-    def forward(self, x: Tensor, mask: Tensor, use_kernels: bool = False) -> Tensor:
+    def forward(
+        self, x: Tensor, mask: Tensor, use_kernels: bool = False, low_memory: bool = False
+    ) -> Tensor:
         """Perform a forward pass.
 
         Parameters
@@ -169,6 +196,8 @@ class TriangleMultiplicationIncoming(nn.Module):
             The input mask of shape (B, N, N)
         use_kernels: bool
             Whether to use the kernel
+        low_memory: bool
+            Whether to use low memory mode
 
         Returns
         -------
@@ -195,10 +224,31 @@ class TriangleMultiplicationIncoming(nn.Module):
         # Input gating: D -> D
         x = self.norm_in(x)
         x_in = x
-        x = self.p_in(x) * self.g_in(x).sigmoid()
 
-        # Apply mask
-        x = x * mask.unsqueeze(-1)
+        if low_memory:
+            # Chunked gate computation to reduce peak memory
+            nchunks = 4
+            chunk_bounds = torch.linspace(
+                0, x.shape[2], steps=nchunks + 1, device=x.device
+            ).long()
+            x = torch.empty(
+                (x.shape[0], x.shape[1], x.shape[2], x.shape[3] * 2),
+                device=x.device,
+                dtype=x_in.dtype,
+            )
+            for i in range(nchunks):
+                start = chunk_bounds[i].item()
+                end = chunk_bounds[i + 1].item()
+                x[:, :, start:end, :] = (
+                    self.p_in(x_in[:, :, start:end, :])
+                    * self.g_in(x_in[:, :, start:end, :]).sigmoid()
+                )
+            # In-place mask application
+            x *= mask.unsqueeze(-1)
+        else:
+            x = self.p_in(x) * self.g_in(x).sigmoid()
+            # Apply mask
+            x = x * mask.unsqueeze(-1)
 
         # Split input and cast to float
         a, b = torch.chunk(x.float(), 2, dim=-1)
