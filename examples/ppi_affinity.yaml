@@ -1,0 +1,18 @@
+# Protein-protein interaction input.
+#
+# `properties.affinity` takes `rec` (target) and `lig` (binder) instead of the
+# small-molecule `binder` key. This populates `ppi_rec_token_mask` and
+# `ppi_lig_token_mask` at featurisation time, which boltzppi consumes as its
+# target/binder masks.
+version: 1
+sequences:
+  - protein:
+      id: A          # target
+      sequence: MVTPEGNVSLVDESLLVGVTDEDRAVRSAHQFYERLIGLWAPAVMEAAHELGVFAALAEAPADSGELARRLDCDARAMRVLLDALYAYDVIDRIHDTNGFRYLLSAEARECLLPGTLFSLVGKFMHDINVAWPAWRNLAEVVRHGARD
+  - protein:
+      id: B          # binder (e.g. VHH)
+      sequence: QVQLVESGGGLVQAGGSLRLSCAASGRTFSSYAMGWFRQAPGKEREFVATISWSGGSTYYTDSVKGRFTISRDNAKNTVYLQMNSLKPEDTAVYYCAAGSSWYLDRSDYDYWGQGTQVTVSS
+properties:
+  - affinity:
+      rec: A
+      lig: B

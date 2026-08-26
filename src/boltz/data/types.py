@@ -568,6 +568,10 @@ class AffinityInfo:
 
     chain_id: int
     mw: float
+    # For protein-protein inputs, `properties.affinity.{rec,lig}`. Both stay
+    # None on the small-molecule path so existing YAMLs are unaffected.
+    rec_chain_id: Optional[int] = None
+    lig_chain_id: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -760,6 +764,13 @@ TokenV2 = [
     ("frame_mask", np.dtype("i4")),
     ("cyclic_period", np.dtype("i4")),
     ("affinity_mask", np.dtype("?")),
+    # PPI binder/target roles. NOTE: the two bools below take the record from
+    # 160 to 162 bytes; `mol_type` is i4 specifically so the total stays
+    # divisible by 4, so two explicit pad bytes are required to restore that.
+    ("ppi_rec_mask", np.dtype("?")),
+    ("ppi_lig_mask", np.dtype("?")),
+    ("_ppi_pad0", np.dtype("?")),
+    ("_ppi_pad1", np.dtype("?")),
 ]
 
 TokenBondV2 = [

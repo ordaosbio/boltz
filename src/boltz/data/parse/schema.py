@@ -1,5 +1,5 @@
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Optional
 
@@ -1044,6 +1044,10 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
 
     # Check if any affinity ligand is present
     affinity_ligands = set()
+    # PPI mode: `properties.affinity.{rec,lig}` instead of `binder`.
+    # Stays None on the small-molecule path.
+    ppi_rec_name: Optional[str] = None
+    ppi_lig_name: Optional[str] = None
     properties = schema.get("properties", [])
     if properties and not boltz_2:
         msg = "Affinity prediction is only supported for Boltz2!"
@@ -1052,7 +1056,20 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
     for prop in properties:
         prop_type = next(iter(prop.keys())).lower()
         if prop_type == "affinity":
-            binder = prop["affinity"]["binder"]
+            spec = prop["affinity"]
+            is_ppi = "binder" not in spec
+            if is_ppi:
+                if not {"rec", "lig"} <= set(spec):
+                    msg = (
+                        "affinity must specify either `binder` (small molecule) "
+                        "or both `rec` and `lig` (protein-protein)."
+                    )
+                    raise ValueError(msg)
+                binder = spec["lig"]
+                ppi_rec_name = spec["rec"]
+                ppi_lig_name = spec["lig"]
+            else:
+                binder = spec["binder"]
             if not isinstance(binder, str):
                 # TODO: support multi residue ligands and ccd's
                 msg = "Binder must be a single chain."
@@ -1062,10 +1079,22 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
                 msg = f"Could not find binder with name {binder} in the input!"
                 raise ValueError(msg)
 
-            if chain_name_to_entity_type[binder] != "ligand":
+            if is_ppi:
+                if ppi_rec_name not in chain_name_to_entity_type:
+                    msg = f"Could not find rec chain {ppi_rec_name} in the input!"
+                    raise ValueError(msg)
+                for name in (ppi_rec_name, ppi_lig_name):
+                    if chain_name_to_entity_type[name] != "protein":
+                        msg = f"PPI affinity requires protein chains; {name} is not."
+                        raise ValueError(msg)
+                if ppi_rec_name == ppi_lig_name:
+                    msg = "PPI affinity requires distinct rec and lig chains."
+                    raise ValueError(msg)
+            elif chain_name_to_entity_type[binder] != "ligand":
                 msg = (
                     f"Chain {binder} is not a ligand! "
-                    "Affinity is currently only supported for ligands."
+                    "Small-molecule affinity is only supported for ligands; "
+                    "use `rec`/`lig` for protein-protein."
                 )
                 raise ValueError(msg)
 
@@ -1324,6 +1353,7 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
     chain_data = []
     protein_chains = set()
     affinity_info = None
+    chain_name_to_asym: dict[str, int] = {}
 
     rdkit_bounds_constraint_data = []
     chiral_atom_constraint_data = []
@@ -1343,6 +1373,8 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
     atom_idx_map = {}
 
     for asym_id, (chain_name, chain) in enumerate(chains.items()):
+        chain_name_to_asym[chain_name] = asym_id
+
         # Compute number of atoms and residues
         res_num = len(chain.residues)
         atom_num = sum(len(res.atoms) for res in chain.residues)
@@ -1734,6 +1766,21 @@ def parse_boltz_schema(  # noqa: C901, PLR0915, PLR0912
             )
         # Save template
         templates[template_id] = parsed_template.data
+
+    # Resolve PPI rec/lig chain names to asym ids. Done after the loop because
+    # `rec` may appear before or after `lig` in the input.
+    if affinity_info is not None and ppi_rec_name is not None:
+        missing = [
+            n for n in (ppi_rec_name, ppi_lig_name) if n not in chain_name_to_asym
+        ]
+        if missing:
+            msg = f"PPI affinity chains not found in assembly: {missing}"
+            raise ValueError(msg)
+        affinity_info = replace(
+            affinity_info,
+            rec_chain_id=chain_name_to_asym[ppi_rec_name],
+            lig_chain_id=chain_name_to_asym[ppi_lig_name],
+        )
 
     # Convert into datatypes
     residues = np.array(res_data, dtype=Residue)
