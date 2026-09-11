@@ -673,6 +673,8 @@ class Boltz2(LightningModule):
                 "pdistogram": pdistogram,
                 "s": s,
                 "z": z,
+                "s_inputs": s_inputs,
+                "relative_position_encoding": relative_position_encoding,
             }
 
             if (
@@ -1255,6 +1257,21 @@ class Boltz2(LightningModule):
             pred_dict["token_masks"] = batch["token_pad_mask"]
             pred_dict["s"] = out["s"]
             pred_dict["z"] = out["z"]
+            pred_dict["s_inputs"] = out.get("s_inputs")
+            pred_dict["asym_id"] = batch.get("asym_id")
+            pred_dict["mol_type"] = batch.get("mol_type")
+            pred_dict["token_to_rep_atom"] = batch.get("token_to_rep_atom")
+            pred_dict["atom_to_token"] = batch.get("atom_to_token")
+
+            # Build z_input (rel_pos + token_bonds [+ token_bonds_type] + contact)
+            # so downstream PPI heads don't need the model to reconstruct it.
+            rel_pos = out.get("relative_position_encoding")
+            if rel_pos is not None:
+                z_input = rel_pos + self.token_bonds(batch["token_bonds"].float())
+                if getattr(self, "bond_type_feature", False) and "type_bonds" in batch:
+                    z_input = z_input + self.token_bonds_type(batch["type_bonds"].long())
+                z_input = z_input + self.contact_conditioning(batch)
+                pred_dict["z_input"] = z_input
 
             if "keys_dict_out" in self.predict_args:
                 for key in self.predict_args["keys_dict_out"]:
