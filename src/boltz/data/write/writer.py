@@ -248,14 +248,30 @@ class BoltzWriter(BasePredictionWriter):
                 
             # Save embeddings
             if self.write_embeddings and "s" in prediction and "z" in prediction:
-                s = prediction["s"].cpu().numpy()
-                z = prediction["z"].cpu().numpy()
+                emb = {
+                    "s": prediction["s"].cpu().numpy(),
+                    "z": prediction["z"].cpu().numpy(),
+                }
+                for key in (
+                    "s_inputs",
+                    "z_input",
+                    "asym_id",
+                    "mol_type",
+                    "token_to_rep_atom",
+                    "atom_to_token",
+                    "masks",
+                    "token_masks",
+                    "coords",
+                ):
+                    if key in prediction and prediction[key] is not None:
+                        v = prediction[key]
+                        emb[key] = v.cpu().numpy() if hasattr(v, "cpu") else v
 
                 path = (
                     struct_dir
                     / f"embeddings_{record.id}.npz"
                 )
-                np.savez_compressed(path, s=s, z=z)
+                np.savez_compressed(path, **emb)
 
     def on_predict_epoch_end(
         self,
